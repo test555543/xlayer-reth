@@ -6,6 +6,15 @@ XLayer Reth is a customized implementation of [Reth](https://github.com/paradigm
 
 This project provides a high-performance, production-ready Ethereum execution client tailored for XLayer's specific requirements. It builds upon the upstream Reth codebase with custom optimizations and features for the XLayer network.
 
+### Why We Maintain a Fork
+
+XLayer Reth uses a [fork of Reth](https://github.com/okx/reth) instead of depending directly on upstream for the following reasons:
+
+- **Custom Features**: Ability to implement XLayer-specific features and optimizations that may not be suitable for upstream
+- **Rapid Development**: Control over the codebase allows us to merge critical changes quickly without waiting for upstream review cycles
+- **Flexibility**: Direct access to modify internal code when needed for urgent fixes or network-specific requirements
+- **Stability**: Independence from upstream breaking changes while still being able to selectively integrate improvements
+
 ## Architecture
 
 XLayer Reth is structured as a Rust workspace with the following components:
