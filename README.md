@@ -53,7 +53,11 @@ Maximum performance build:
 
 ## Building
 
-We use [just](https://github.com/casey/just) as our command runner. 
+We use [just](https://github.com/casey/just) as our command runner. Install it with:
+
+```bash
+cargo install just
+```
 
 ### Build Commands
 
