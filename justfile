@@ -25,7 +25,13 @@ build:
     cargo build --release
 
 build-maxperf:
-    cargo build --profile maxperf --features jemalloc
+    RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak
+
+install:
+    cargo install --path crates/node --bin xlayer-reth-node --force --locked --profile release
+
+install-maxperf:
+    RUSTFLAGS="-C target-cpu=native" cargo install --path crates/node --bin xlayer-reth-node --force --locked --profile maxperf --features jemalloc,asm-keccak
 
 clean:
     cargo clean

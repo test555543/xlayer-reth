@@ -75,6 +75,24 @@ just build-maxperf
 just clean
 ```
 
+### Install Commands
+
+Install the binary to `~/.cargo/bin` (or `$CARGO_HOME/bin`):
+
+```bash
+# Install standard release build
+just install
+
+# Install maximum performance build
+just install-maxperf
+```
+
+After installation, you can run the node from anywhere:
+
+```bash
+xlayer-reth-node --help
+```
+
 ### Development Commands
 
 ```bash

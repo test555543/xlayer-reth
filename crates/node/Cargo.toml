@@ -40,6 +40,9 @@ reqwest.workspace = true
 # rpc
 jsonrpsee.workspace = true
 
+# alloy
+alloy-primitives.workspace = true
+
 # misc
 clap.workspace = true
 tracing.workspace = true
@@ -58,3 +61,4 @@ once_cell.workspace = true
 [features]
 default = []
 jemalloc = ["reth-cli-util/jemalloc", "reth-optimism-cli/jemalloc"]
+asm-keccak = ["alloy-primitives/asm-keccak"]

@@ -12279,6 +12279,7 @@ dependencies = [
 name = "xlayer-reth-node"
 version = "0.1.0"
 dependencies = [
+ "alloy-primitives",
  "chrono",
  "clap",
  "eyre",
