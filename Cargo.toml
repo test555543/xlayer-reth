@@ -14,6 +14,7 @@ repository = "https://github.com/okx/xlayer-reth.git"
 resolver = "2"
 members = [
     "crates/node",
+    "crates/innertx",
 ]
 default-members = ["crates/node"]
 
@@ -73,12 +74,14 @@ reth-exex = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
 reth-db = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
 reth-testing-utils = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
 reth-db-common = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
+reth-revm = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
 
 # ------------------------------------------------------------------------------
 # Revm Dependencies (follows upstream reth)
 # ------------------------------------------------------------------------------
 revm = { version = "31.0.2", default-features = false }
 revm-bytecode = { version = "7.1.1", default-features = false }
+revm-context-interface = { version = "12.0.1", default-features = false }
 
 # ------------------------------------------------------------------------------
 # Alloy Dependencies
@@ -97,6 +100,7 @@ alloy-provider = { version = "1.0.41" }
 alloy-hardforks = "0.4.4"
 alloy-rpc-client = { version = "1.0.41" }
 alloy-serde = { version = "1.0.41" }
+alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 
 # op-alloy
 op-alloy-rpc-types = { version = "0.22.0", default-features = false }

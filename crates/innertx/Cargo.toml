@@ -1,0 +1,18 @@
+[package]
+name = "xlayer-innertx"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+reth-revm.workspace = true
+revm-context-interface.workspace = true
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

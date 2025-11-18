@@ -12276,6 +12276,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "xlayer-innertx"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "reth-revm",
+ "revm-context-interface",
+ "serde",
+]
+
+[[package]]
 name = "xlayer-reth-node"
 version = "0.1.0"
 dependencies = [
