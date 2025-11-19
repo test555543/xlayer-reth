@@ -4,13 +4,18 @@
 //! or run a specific test with: `cargo test -p xlayer-e2e-test --test e2e_tests -- <test_case_name> -- --nocapture`
 //! --test-threads=1`
 
-use alloy_primitives::U256;
+use alloy_network::TransactionBuilder;
+use alloy_primitives::{hex, Address, Bytes, B256, U256};
+use alloy_rpc_types_eth::{AccessList, AccessListItem, TransactionRequest};
+use alloy_signer_local::PrivateKeySigner;
+use alloy_sol_types::{sol, SolCall};
+use jsonrpsee::core::client::ClientT;
+use serde_json::json;
+use std::str::FromStr;
 use xlayer_e2e_test::operations;
 
 #[tokio::test]
 async fn test_send_transaction() {
-    use alloy_primitives::U256;
-
     // Transfer 1 ETH to test account 1
     let amount = U256::from(operations::ETH_WEI); // 1 ETH in wei
     let to_address = operations::manager::DEFAULT_L2_NEW_ACC1_ADDRESS;
@@ -373,9 +378,6 @@ async fn test_eth_block_rpc(#[case] test_name: &str) {
 #[case::get_transaction_receipt("EthGetTransactionReceipt")]
 #[tokio::test]
 async fn test_eth_transaction_rpc(#[case] test_name: &str) {
-    use alloy_primitives::hex;
-    use alloy_sol_types::{sol, SolCall};
-
     let client = operations::create_test_client(operations::DEFAULT_L2_NETWORK_URL);
 
     // Setup: Ensure contracts are deployed
@@ -639,15 +641,6 @@ async fn test_txpool_rpc(#[case] test_name: &str) {
 #[case::eip4844_blob_fields("Eip4844BlobFields")]
 #[tokio::test]
 async fn test_new_transaction_types(#[case] test_name: &str) {
-    use alloy_network::TransactionBuilder;
-    use alloy_primitives::{hex, Address, Bytes, B256, U256};
-    use alloy_rpc_types_eth::{AccessList, AccessListItem, TransactionRequest};
-    use alloy_signer_local::PrivateKeySigner;
-    use alloy_sol_types::{sol, SolCall};
-    use jsonrpsee::core::client::ClientT;
-    use serde_json::json;
-    use std::str::FromStr;
-
     let client = operations::create_test_client(operations::DEFAULT_L2_NETWORK_URL);
     let private_key = "363ea277eec54278af051fb574931aec751258450a286edce9e1f64401f3b9c8";
 
