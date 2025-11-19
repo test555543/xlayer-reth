@@ -71,24 +71,15 @@ where
 }
 
 /// Helper function to create a modified header with custom number and parent_hash.
-/// Since Header is a trait, we need to work with the concrete type.
-/// We'll use unsafe to modify the fields, which is safe because we're only modifying
-/// standard fields (number and parent_hash) that exist in all Header implementations.
 fn create_modified_header<H: BlockHeader + Clone>(
     original: &H,
     number: u64,
     parent_hash: B256,
 ) -> H {
-    // Clone the header
     let mut modified = original.clone();
 
-    // Modify number and parent_hash fields
-    // Since H is a trait, we can't directly access fields. We need to use unsafe
-    // to cast to the concrete Header type and modify the fields.
-    // SAFETY: We know that H is Header (the concrete type from alloy_consensus) in practice.
-    // We're only modifying number and parent_hash which are standard fields in all Header implementations.
+    // SAFETY: We're only modifying standard fields (number and parent_hash) that exist in all Header implementations.
     unsafe {
-        // Cast to *mut Header to modify fields
         let header_ptr = &mut modified as *mut H as *mut Header;
         (*header_ptr).number = number;
         (*header_ptr).parent_hash = parent_hash;
@@ -103,7 +94,6 @@ where
 {
     type Header = CS::Header;
 
-    // Delegate all methods to inner except genesis_header and genesis_hash
     delegate! {
         to self.inner {
             fn chain(&self) -> Chain;
@@ -118,14 +108,10 @@ where
         }
     }
 
-    // Override genesis_header to return the modified header
     fn genesis_header(&self) -> &Self::Header {
         &self.modified_header
     }
 
-    // Override genesis_hash to return the hash of the modified header
-    // This is necessary because genesis_hash is calculated from genesis_header.hash_slow(),
-    // and we've modified the header's number and parent_hash fields
     fn genesis_hash(&self) -> B256 {
         self.modified_header.hash_slow()
     }
@@ -190,19 +176,11 @@ where
         use reth_tracing::tracing::error;
 
         let chain_spec = factory.chain_spec();
-
-        // Insert header with modified number and parent_hash from genesis
-        // Create a modified chain spec wrapper that overrides genesis_header
-        // If legacyXLayerBlock is specified in config, it will override genesis.number
         let chain = XLayerChainSpec::new(&chain_spec);
 
         let genesis = chain.genesis();
         let hash = chain.genesis_hash();
-
-        // Get the genesis block number from the chain spec
         let genesis_block_number = chain.genesis_header().number();
-
-        // Check if we already have the genesis header or if we have the wrong one.
         match factory.block_hash(genesis_block_number) {
             Ok(None)
             | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, _)) => {}
@@ -234,40 +212,26 @@ where
         debug!("Writing genesis block in custom block number: {}", genesis_block_number);
 
         let alloc = &genesis.alloc;
-
-        // use transaction to insert genesis header
         let provider_rw = factory.database_provider_rw()?;
+
         insert_genesis_hashes(&provider_rw, alloc.iter())?;
-        // Use custom insert_genesis_history that supports non-zero genesis block numbers
         insert_genesis_history_custom(&provider_rw, alloc.iter(), genesis_block_number)?;
-
-        // Custom insert_genesis_header that supports non-zero genesis block numbers
         insert_genesis_header_custom(&provider_rw, &chain)?;
-
-        // Use custom insert_genesis_state that supports non-zero genesis block numbers
         insert_genesis_state_custom(&provider_rw, alloc.iter(), genesis_block_number)?;
-
-        // compute state root to populate trie tables
         compute_state_root(&provider_rw, None)?;
 
-        // Set stage checkpoint to genesis block number for all stages
         let checkpoint =
             StageCheckpoint { block_number: genesis_block_number, ..Default::default() };
         for stage in StageId::ALL {
             provider_rw.save_stage_checkpoint(stage, checkpoint)?;
         }
 
-        // Static file segments start empty, so we need to initialize the genesis block.
         let static_file_provider = provider_rw.static_file_provider();
-
-        // Initialize Transactions and Receipts static files
         initialize_transactions_and_receipts_static_files(
             &static_file_provider,
             genesis_block_number,
         )?;
 
-        // `commit_unwind`` will first commit the DB and then the static file provider, which is
-        // necessary on `init_genesis`.
         provider_rw.commit()?;
 
         Ok(hash)
@@ -290,15 +254,12 @@ where
 
     let (header, block_hash) = (chain.genesis_header(), chain.genesis_hash());
     let static_file_provider = provider.static_file_provider();
-
-    // Get the actual genesis block number from the header
     let genesis_block_number = header.number();
 
     match static_file_provider.block_hash(genesis_block_number) {
         Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, _)) => {
             let difficulty = header.difficulty();
 
-            // For non-zero genesis blocks, initialize header static files
             if genesis_block_number > 0 {
                 initialize_header_static_files(
                     provider,
@@ -309,7 +270,6 @@ where
                     genesis_block_number,
                 )?;
             } else {
-                // For zero genesis blocks, use normal append_header
                 let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
                 writer.append_header(header, &block_hash)?;
             }
@@ -318,22 +278,18 @@ where
         Err(e) => return Err(e.into()),
     }
 
-    // Store the genesis header number mapping
     provider.tx_ref().put::<tables::HeaderNumbers>(block_hash, genesis_block_number)?;
-    // Store genesis block body indices
     provider.tx_ref().put::<tables::BlockBodyIndices>(genesis_block_number, Default::default())?;
 
     Ok(())
 }
 
 /// Creates an empty header for a given block number.
-/// This is used to fill in blocks before the actual genesis block.
 fn create_empty_header<H>(block_number: u64) -> H
 where
     H: alloy_consensus::BlockHeader + Default,
 {
     let mut header = H::default();
-    // Set the block number using unsafe pointer cast
     // SAFETY: We're only setting the number field which exists in all BlockHeader implementations
     unsafe {
         use alloy_consensus::Header;
@@ -344,7 +300,6 @@ where
 }
 
 /// Generic function to create static file ranges with custom logic per range.
-/// Uses a closure to allow different implementations for headers vs transactions/receipts.
 fn create_static_file_ranges<F, T>(
     num_ranges_to_create: u64,
     genesis_range_idx: u64,
@@ -361,7 +316,6 @@ where
         let range_start = range_idx * DEFAULT_BLOCKS_PER_STATIC_FILE;
         let range_end = (range_idx + 1) * DEFAULT_BLOCKS_PER_STATIC_FILE - 1;
 
-        // Call the custom handler for this range
         range_handler(range_idx, range_start, range_end)?;
 
         info!(
@@ -379,7 +333,6 @@ where
 }
 
 /// Initializes header static files for non-zero genesis blocks.
-/// Creates all necessary static file ranges and fills them with empty headers up to and including the genesis block.
 fn initialize_header_static_files<Provider, H>(
     provider: &Provider,
     static_file_provider: &StaticFileProvider<impl NodePrimitives<BlockHeader = H>>,
@@ -392,10 +345,7 @@ where
     Provider: DBProvider<Tx: reth_db_api::transaction::DbTxMut>,
     H: alloy_consensus::BlockHeader + Default + Sealable + Compact,
 {
-    // Calculate which range the genesis block is in
     let genesis_range_idx = genesis_block_number / DEFAULT_BLOCKS_PER_STATIC_FILE;
-
-    // We need to create files for all ranges up to and including the genesis range
     let num_ranges_to_create = genesis_range_idx + 1;
 
     info!(
@@ -407,7 +357,6 @@ where
         "Creating static file ranges for headers from block 0 to genesis block"
     );
 
-    // Create all header static file ranges and fill genesis range
     create_and_fill_header_static_files(
         provider,
         static_file_provider,
@@ -420,7 +369,7 @@ where
     Ok(())
 }
 
-/// Creates all header static file ranges and fills the genesis range with empty headers.
+/// Creates all header static file ranges and fills the genesis range.
 fn create_and_fill_header_static_files<Provider, H>(
     provider: &Provider,
     static_file_provider: &StaticFileProvider<impl NodePrimitives<BlockHeader = H>>,
@@ -436,34 +385,26 @@ where
     use alloy_primitives::U256;
     use reth_db_api::{tables, transaction::DbTxMut};
 
-    // Calculate which range the genesis block is in
     let genesis_range_idx = genesis_block_number / DEFAULT_BLOCKS_PER_STATIC_FILE;
     let num_ranges_to_create = genesis_range_idx + 1;
 
-    // Create all header static file ranges
     create_static_file_ranges(
         num_ranges_to_create,
         genesis_range_idx,
         "headers",
         |range_idx, range_start, range_end| {
-            // Get writer for this specific range
             let mut writer =
                 static_file_provider.get_writer(range_start, StaticFileSegment::Headers)?;
 
-            // Insert one empty header at the start of this range to create the file
             let empty_header = create_empty_header::<H>(range_start);
             let empty_hash = empty_header.hash_slow();
 
-            // Set block range: block_end = range_start - 1, so next_block_number() = range_start
-            // This allows append_header_with_td to insert at range_start
             if range_start > 0 {
                 writer.user_header_mut().set_block_range(range_start, range_start - 1);
             }
             writer.append_header_with_td(&empty_header, U256::ZERO, &empty_hash)?;
 
-            // Store the header number mapping in the database
             provider.tx_ref().put::<tables::HeaderNumbers>(empty_hash, range_start)?;
-            // Store empty block body indices
             provider.tx_ref().put::<tables::BlockBodyIndices>(range_start, Default::default())?;
 
             Ok((range_idx, range_start, range_end))
@@ -476,7 +417,6 @@ where
         "Finished creating header static file ranges, now filling genesis range and inserting genesis header"
     );
 
-    // Fill the genesis range and insert the actual genesis header
     fill_header_genesis_range(
         provider,
         static_file_provider,
@@ -490,7 +430,7 @@ where
     Ok(())
 }
 
-/// Fills the genesis range with empty headers and inserts the actual genesis header.
+/// Fills the genesis range with empty headers and inserts the genesis header.
 fn fill_header_genesis_range<Provider, H>(
     provider: &Provider,
     static_file_provider: &StaticFileProvider<impl NodePrimitives<BlockHeader = H>>,
@@ -511,19 +451,15 @@ where
     let mut genesis_writer =
         static_file_provider.get_writer(genesis_range_start, StaticFileSegment::Headers)?;
 
-    // Fill in all empty headers from genesis_range_start+1 to genesis_block_number-1
     for block_num in (genesis_range_start + 1)..genesis_block_number {
         let empty_header = create_empty_header::<H>(block_num);
         let empty_hash = empty_header.hash_slow();
 
         genesis_writer.append_header_with_td(&empty_header, U256::ZERO, &empty_hash)?;
 
-        // Store the header number mapping in the database
         provider.tx_ref().put::<tables::HeaderNumbers>(empty_hash, block_num)?;
-        // Store empty block body indices
         provider.tx_ref().put::<tables::BlockBodyIndices>(block_num, Default::default())?;
 
-        // Log progress every 100,000 blocks
         if block_num % 100_000 == 0 || block_num == genesis_block_number - 1 {
             info!(
                 target: "reth::cli",
@@ -534,22 +470,18 @@ where
         }
     }
 
-    // Now insert the actual genesis header
     genesis_writer.append_header_with_td(genesis_header, U256::from(difficulty), genesis_hash)?;
 
     Ok(())
 }
 
 /// Initializes Transactions and Receipts static files.
-/// For non-zero genesis blocks, creates all necessary static file ranges and fills them with empty blocks.
-/// For zero genesis blocks, just sets the block range.
 fn initialize_transactions_and_receipts_static_files(
     static_file_provider: &StaticFileProvider<impl NodePrimitives>,
     genesis_block_number: u64,
 ) -> Result<(), InitStorageError> {
     use reth_tracing::tracing::info;
 
-    // For zero genesis blocks, just set the block range
     if genesis_block_number == 0 {
         let segment = StaticFileSegment::Receipts;
         static_file_provider
@@ -566,11 +498,7 @@ fn initialize_transactions_and_receipts_static_files(
         return Ok(());
     }
 
-    // For non-zero genesis blocks, create all necessary ranges
-    // Calculate which range the genesis block is in
     let genesis_range_idx = genesis_block_number / DEFAULT_BLOCKS_PER_STATIC_FILE;
-
-    // We need to create files for all ranges up to and including the genesis range
     let num_ranges_to_create = genesis_range_idx + 1;
 
     info!(
@@ -581,7 +509,6 @@ fn initialize_transactions_and_receipts_static_files(
         "Creating static file ranges for Transactions and Receipts"
     );
 
-    // Initialize Transactions segment
     initialize_segment_static_files(
         static_file_provider,
         StaticFileSegment::Transactions,
@@ -590,7 +517,6 @@ fn initialize_transactions_and_receipts_static_files(
         genesis_block_number,
     )?;
 
-    // Initialize Receipts segment
     initialize_segment_static_files(
         static_file_provider,
         StaticFileSegment::Receipts,
@@ -603,7 +529,6 @@ fn initialize_transactions_and_receipts_static_files(
 }
 
 /// Initializes a single static file segment (Transactions or Receipts).
-/// Creates all necessary static file ranges and fills the genesis range with empty blocks.
 fn initialize_segment_static_files(
     static_file_provider: &StaticFileProvider<impl NodePrimitives>,
     segment: StaticFileSegment,
@@ -611,14 +536,12 @@ fn initialize_segment_static_files(
     genesis_range_idx: u64,
     genesis_block_number: u64,
 ) -> Result<(), InitStorageError> {
-    // Get segment name for logging
     let segment_name = match segment {
         StaticFileSegment::Transactions => "transactions",
         StaticFileSegment::Receipts => "receipts",
         _ => "segment",
     };
 
-    // Initialize segment - one increment per range
     create_static_file_ranges(
         num_ranges_to_create,
         num_ranges_to_create - 1,
@@ -626,7 +549,6 @@ fn initialize_segment_static_files(
         |range_idx, range_start, _range_end| {
             let mut writer = static_file_provider.get_writer(range_start, segment)?;
 
-            // Set block range: block_end = range_start - 1, so next_block_number() = range_start
             if range_start > 0 {
                 writer.user_header_mut().set_block_range(range_start, range_start - 1);
             }
@@ -636,7 +558,6 @@ fn initialize_segment_static_files(
         },
     )?;
 
-    // Fill the genesis range with all missing blocks
     let genesis_range_start = genesis_range_idx * DEFAULT_BLOCKS_PER_STATIC_FILE;
     fill_static_file_range_with_empty_blocks(
         static_file_provider,

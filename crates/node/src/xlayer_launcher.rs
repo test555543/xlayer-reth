@@ -42,16 +42,11 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// XLayer custom engine node launcher.
 ///
-/// This launcher wraps `EngineNodeLauncher` and replaces the genesis
-/// initialization step with XLayer's custom implementation that properly
-/// handles non-zero genesis blocks.
-///
-/// All other functionality is delegated to the underlying `EngineNodeLauncher`.
+/// Wraps `EngineNodeLauncher` and uses XLayer's custom genesis initialization
+/// to handle non-zero genesis blocks.
 #[derive(Debug)]
 pub struct XLayerEngineNodeLauncher {
-    /// The underlying engine node launcher.
     inner: EngineNodeLauncher,
-    /// Custom genesis initializer.
     genesis_initializer: XLayerGenesisInitializer,
 }
 
@@ -69,14 +64,9 @@ impl XLayerEngineNodeLauncher {
     }
 }
 
-// Note: We could add accessor methods here if needed, but for now
-// we access the inner launcher's fields directly when needed
-
 /// Extension trait for `LaunchContextWith` to use custom genesis initialization.
 pub trait LaunchContextGenesisExt<T: NodeTypes> {
     /// Initialize genesis using XLayer's custom initializer.
-    ///
-    /// This method replaces the default `with_genesis()` behavior.
     fn with_xlayer_genesis(
         self,
         initializer: &XLayerGenesisInitializer,
@@ -98,8 +88,6 @@ where
     where
         Self: Sized,
     {
-        // Access provider_factory through the right() method
-        // right() returns &ProviderFactory<T>, which implements all the traits needed
         let provider_factory = self.right();
         debug!(target: "xlayer::genesis", "Initializing genesis with XLayer custom initializer");
         initializer.init_genesis(provider_factory)?;
@@ -107,8 +95,6 @@ where
     }
 }
 
-// Implement LaunchNode trait for XLayerEngineNodeLauncher
-// This replicates the launch logic but replaces genesis initialization
 impl<T, CB, AO> reth::builder::LaunchNode<reth_node_builder::NodeBuilderWithComponents<T, CB, AO>>
     for XLayerEngineNodeLauncher
 where
@@ -140,13 +126,6 @@ where
 
 impl XLayerEngineNodeLauncher {
     /// Launch node with custom genesis initialization.
-    ///
-    /// This replicates EngineNodeLauncher::launch_node but replaces
-    /// `.with_genesis()?` with `.with_xlayer_genesis(&genesis_initializer)?`
-    ///
-    /// NOTE: This is a simplified implementation. For production use, you should
-    /// replicate the entire launch_node method from EngineNodeLauncher and replace
-    /// only the genesis initialization step.
     async fn launch_node_with_custom_genesis<T, CB, AO>(
         self,
         target: reth_node_builder::NodeBuilderWithComponents<T, CB, AO>,
@@ -165,28 +144,9 @@ impl XLayerEngineNodeLauncher {
         AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
             + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
     {
-        // Extract components
         let Self { inner, genesis_initializer } = self;
         let reth::builder::EngineNodeLauncher { ctx, engine_tree_config } = inner;
 
-        // We need to replicate the entire launch_node implementation here
-        // but replace `.with_genesis()?` with `.with_xlayer_genesis(&genesis_initializer)?`
-        //
-        // Since replicating 300+ lines of code is complex and error-prone,
-        // we'll use a helper function that does the replacement.
-        //
-        // For now, we'll delegate to a helper that modifies the launch context
-        // before the genesis step. However, since with_genesis() is called inside
-        // launch_node, we need to replicate the entire method.
-
-        // TODO: Complete this implementation by replicating EngineNodeLauncher::launch_node
-        // and replacing line 108 (.with_genesis()?) with:
-        //     .with_xlayer_genesis(&genesis_initializer)?
-
-        // For now, use the inner launcher but manually initialize genesis first
-        // This is a workaround until we complete the full replication
-
-        // Extract target components
         let reth_node_builder::NodeBuilderWithComponents {
             adapter: reth_node_builder::NodeTypesAdapter { database },
             components_builder,
@@ -198,7 +158,6 @@ impl XLayerEngineNodeLauncher {
             on_component_initialized, on_node_started, ..
         } = hooks;
 
-        // Setup launch context - THIS IS WHERE WE REPLACE with_genesis()
         let ctx = ctx
             .with_configured_globals(engine_tree_config.reserved_cpu_cores())
             .with_loaded_toml_config(config)?
@@ -220,7 +179,7 @@ impl XLayerEngineNodeLauncher {
                     "Initializing genesis with XLayer custom initializer"
                 );
             })
-            // KEY REPLACEMENT: Use our custom genesis initialization instead of .with_genesis()?
+            // Use our custom genesis initialization instead of .with_genesis()?
             .with_xlayer_genesis(&genesis_initializer)?
             .inspect(|this: &LaunchContextWith<Attached<WithConfigs<<T::Types as reth_node_types::NodeTypes>::ChainSpec>, _>>| {
                 use reth_chainspec::EthChainSpec;
@@ -233,8 +192,6 @@ impl XLayerEngineNodeLauncher {
             .with_components(components_builder, on_component_initialized)
             .await?;
 
-        // Continue with the rest of the launch process (replicated from EngineNodeLauncher::launch_node)
-
         // spawn exexs if any
         let maybe_exex_manager_handle = ctx.launch_exex(installed_exex).await?;
 
@@ -245,7 +202,6 @@ impl XLayerEngineNodeLauncher {
 
         let node_config = ctx.node_config();
 
-        // We always assume that node is syncing after a restart
         network_handle.update_sync_state(SyncState::Syncing);
 
         let max_block = ctx.max_block(network_client.clone()).await?;
@@ -271,7 +227,6 @@ impl XLayerEngineNodeLauncher {
             ctx.era_import_source(),
         )?;
 
-        // The new engine writes directly to static files. This ensures that they're up to the tip.
         pipeline.move_to_static_files()?;
 
         let pipeline_events = pipeline.events();
@@ -289,7 +244,6 @@ impl XLayerEngineNodeLauncher {
 
         let beacon_engine_handle = ConsensusEngineHandle::new(consensus_engine_tx.clone());
 
-        // extract the jwt secret from the args if possible
         let jwt_secret = ctx.auth_jwt_secret()?;
 
         let add_ons_ctx = AddOnsContext {
@@ -301,13 +255,11 @@ impl XLayerEngineNodeLauncher {
         };
         let validator_builder = add_ons.engine_validator_builder();
 
-        // Build the engine validator with all required components
         let engine_validator = validator_builder
             .clone()
             .build_tree_validator(&add_ons_ctx, engine_tree_config.clone())
             .await?;
 
-        // Create the consensus engine stream with optional reorg
         let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
             .maybe_skip_fcu(node_config.debug.skip_fcu)
             .maybe_skip_new_payload(node_config.debug.skip_new_payload)
@@ -319,9 +271,6 @@ impl XLayerEngineNodeLauncher {
                 node_config.debug.reorg_depth,
             )
             .await?
-            // Store messages _after_ skipping so that `replay-engine` command
-            // would replay only the messages that were observed by the engine
-            // during this run.
             .maybe_store_messages(node_config.debug.engine_api_store.clone());
 
         let mut engine_service = EngineService::new(
@@ -343,7 +292,6 @@ impl XLayerEngineNodeLauncher {
 
         info!(target: "reth::cli", "Consensus engine initialized");
 
-        #[allow(clippy::needless_continue)]
         let events = stream_select!(
             event_sender.new_listener().map(Into::into),
             pipeline_events.map(Into::into),
@@ -364,7 +312,6 @@ impl XLayerEngineNodeLauncher {
         let RpcHandle { rpc_server_handles, rpc_registry, engine_events, beacon_engine_handle } =
             add_ons.launch_add_ons(add_ons_ctx).await?;
 
-        // Run consensus engine to completion
         let initial_target = ctx.initial_backfill_target()?;
         let mut built_payloads = ctx
             .components()
@@ -385,7 +332,6 @@ impl XLayerEngineNodeLauncher {
         ctx.task_executor().spawn_critical("consensus engine", Box::pin(async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
-                // network_handle's sync state is already initialized at Syncing
                 engine_service.orchestrator_mut().start_backfill_sync(initial_target);
             } else if startup_sync_state_idle {
                 network_handle.update_sync_state(SyncState::Idle);
@@ -393,7 +339,6 @@ impl XLayerEngineNodeLauncher {
 
             let mut res = Ok(());
 
-            // advance the chain and await payloads built locally to add into the engine api tree handler to prevent re-execution if that block is received as payload from the CL
             loop {
                 tokio::select! {
                     payload = built_payloads.select_next_some() => {
@@ -425,7 +370,6 @@ impl XLayerEngineNodeLauncher {
                             }
                             ChainEvent::Handler(ev) => {
                                 if let Some(head) = ev.canonical_header() {
-                                    // Once we're progressing via live sync, we can consider the node is not syncing anymore
                                     network_handle.update_sync_state(SyncState::Idle);
                                     let head_block = Head {
                                         number: head.number(),
@@ -469,7 +413,6 @@ impl XLayerEngineNodeLauncher {
                 beacon_engine_handle,
             },
         };
-        // Notify on node started
         on_node_started.on_event(FullNode::clone(&full_node))?;
 
         ctx.spawn_ethstats().await?;
