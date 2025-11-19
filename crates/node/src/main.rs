@@ -13,7 +13,7 @@ use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
 use reth_optimism_node::{args::RollupArgs, OpNode};
 use std::path::Path;
 use tracing::{error, info};
-use xlayer_innertx::db_utils::initialize;
+use xlayer_innertx::{db_utils::initialize, exex_utils::post_exec_exex};
 
 pub const XLAYER_RETH_CLIENT_VERSION: &str = concat!("xlayer/v", env!("CARGO_PKG_VERSION"));
 
@@ -108,17 +108,11 @@ fn main() {
                     // - Inner transaction tracking
                     Ok(())
                 })
-                // .install_exex_if(
-                //     args.xlayer_args.enable_inner_tx,
-                //     "xlayer-innertx",
-                //     move |_ctx| async move {
-                //         Ok(async {
-                //             println!("Inner Tx!!!");
-                //
-                //             loop {}
-                //         })
-                //     },
-                // )
+                .install_exex_if(
+                    args.xlayer_args.enable_inner_tx,
+                    "xlayer-innertx",
+                    move |ctx| async move { Ok(post_exec_exex(ctx)) },
+                )
                 .extend_rpc_modules(move |_ctx| {
                     // TODO: Add XLayer RPC extensions here
                     // - Bridge intercept RPC methods
