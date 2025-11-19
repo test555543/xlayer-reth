@@ -116,63 +116,6 @@ where
     }
 }
 
-/// Route a request by `BlockNumberOrTag` to legacy RPC if below cutoff
-#[macro_export]
-macro_rules! route_by_number {
-    ($method:literal, $self:ident, $number:ident, $legacy_call:expr, $local_expr:expr) => {{
-        if $crate::should_route_to_legacy($self.legacy_rpc_client(), $number) {
-            tracing::info!(target: "rpc::eth::legacy", method = $method, block = ?$number, "→ legacy");
-            let result = $crate::exec_legacy($method, $legacy_call).await.map_err($crate::boxed_err_to_rpc)?;
-            $crate::convert_option_via_serde(result)
-        } else {
-            $local_expr
-        }
-    }};
-}
-
-/// Route a request by `BlockId` to legacy RPC if below cutoff
-#[macro_export]
-macro_rules! route_by_block_id {
-    ($method:literal, $self:ident, $block_id:ident, $legacy_call:expr, $local_expr:expr) => {{
-        if $crate::should_route_block_id_to_legacy($self.legacy_rpc_client(), $self.provider(), Some(&$block_id))? {
-            tracing::info!(target: "rpc::eth::legacy", method = $method, block = ?$block_id, "→ legacy");
-            let result = $crate::exec_legacy($method, $legacy_call).await.map_err($crate::boxed_err_to_rpc)?;
-            return $crate::convert_option_via_serde(result);
-        }
-
-        $local_expr
-    }};
-}
-
-/// Route by optional `BlockId` (for state queries)
-#[macro_export]
-macro_rules! route_by_block_id_opt {
-    ($method:literal, $self:ident, $block_id:ident, $legacy_call:expr, $local_expr:expr) => {{
-        if $crate::should_route_block_id_to_legacy($self.legacy_rpc_client(), $self.provider(), $block_id.as_ref())? {
-            tracing::info!(target: "rpc::eth::legacy", method = $method, block = ?$block_id, "→ legacy");
-            return $crate::exec_legacy($method, $legacy_call).await.map_err($crate::boxed_err_to_rpc);
-        }
-
-        $local_expr
-    }};
-}
-
-/// Try local first, then fallback to legacy (for hash-based queries)
-#[macro_export]
-macro_rules! try_local_then_legacy {
-    ($method:literal, $self:ident, $key:ident, $local_expr:expr, $legacy_call:expr) => {{
-        let local_result = $local_expr;
-        if local_result.is_none() {
-            if let Some(_legacy_client) = $self.legacy_rpc_client() {
-                tracing::info!(target: "rpc::eth::legacy", method = $method, key = ?$key, "→ legacy (fallback)");
-                let result = $crate::exec_legacy($method, $legacy_call).await.map_err($crate:: boxed_err_to_rpc)?;
-                return $crate:: convert_option_via_serde(result);
-            }
-        }
-        Ok(local_result)
-    }};
-}
-
 /// Route to legacy RPC with JSON deserialization if condition is met
 #[macro_export]
 macro_rules! route_by_condition {
