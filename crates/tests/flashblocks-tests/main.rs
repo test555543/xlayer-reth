@@ -38,28 +38,36 @@ async fn test_fb_benchmark_native_tx_confirmation() {
         .unwrap();
         println!("Sent tx: {}", signed_tx);
 
-        // Run benchmark
-        let start = Instant::now();
-        let start_clone = start;
+        // Run benchmark - both nodes check concurrently with independent timers
         let signed_tx_clone = signed_tx.clone();
-        let fb_duration = tokio::time::timeout(TX_CONFIRMATION_TIMEOUT, async move {
-            operations::wait_for_tx_mined(operations::DEFAULT_L2_NETWORK_URL_FB, &signed_tx)
+        let fb_future = async {
+            let start = Instant::now();
+            tokio::time::timeout(TX_CONFIRMATION_TIMEOUT, async move {
+                operations::wait_for_tx_mined(operations::DEFAULT_L2_NETWORK_URL_FB, &signed_tx)
+                    .await?;
+                <Result<u128>>::Ok(start.elapsed().as_millis())
+            })
+            .await
+            .expect("timeout waiting for tx to be mined")
+        };
+
+        let non_fb_future = async {
+            let start = Instant::now();
+            tokio::time::timeout(TX_CONFIRMATION_TIMEOUT, async move {
+                operations::wait_for_tx_mined(
+                    operations::DEFAULT_L2_NETWORK_URL_NO_FB,
+                    &signed_tx_clone,
+                )
                 .await?;
-            <Result<u128>>::Ok(start.elapsed().as_millis())
-        });
+                <Result<u128>>::Ok(start.elapsed().as_millis())
+            })
+            .await
+            .expect("timeout waiting for tx to be mined")
+        };
 
-        let non_fb_duration = tokio::time::timeout(TX_CONFIRMATION_TIMEOUT, async move {
-            operations::wait_for_tx_mined(
-                operations::DEFAULT_L2_NETWORK_URL_NO_FB,
-                &signed_tx_clone,
-            )
-            .await?;
-            <Result<u128>>::Ok(start_clone.elapsed().as_millis())
-        });
-
-        let fb_duration = fb_duration.await.expect("timeout waiting for tx to be mined").unwrap();
-        let non_fb_duration =
-            non_fb_duration.await.expect("timeout waiting for tx to be mined").unwrap();
+        let (fb_duration, non_fb_duration) = tokio::join!(fb_future, non_fb_future);
+        let fb_duration = fb_duration.unwrap();
+        let non_fb_duration = non_fb_duration.unwrap();
         total_fb_duration += fb_duration;
         total_non_fb_duration += non_fb_duration;
 
@@ -104,28 +112,36 @@ async fn test_fb_benchmark_erc20_tx_confirmation() {
         .unwrap();
         println!("Sent erc20 tx: {}", signed_tx);
 
-        // Run benchmark
-        let start = Instant::now();
-        let start_clone = start;
+        // Run benchmark - both nodes check concurrently with independent timers
         let signed_tx_clone = signed_tx.clone();
-        let fb_duration = tokio::time::timeout(TX_CONFIRMATION_TIMEOUT, async move {
-            operations::wait_for_tx_mined(operations::DEFAULT_L2_NETWORK_URL_FB, &signed_tx)
+        let fb_future = async {
+            let start = Instant::now();
+            tokio::time::timeout(TX_CONFIRMATION_TIMEOUT, async move {
+                operations::wait_for_tx_mined(operations::DEFAULT_L2_NETWORK_URL_FB, &signed_tx)
+                    .await?;
+                <Result<u128>>::Ok(start.elapsed().as_millis())
+            })
+            .await
+            .expect("timeout waiting for tx to be mined")
+        };
+
+        let non_fb_future = async {
+            let start = Instant::now();
+            tokio::time::timeout(TX_CONFIRMATION_TIMEOUT, async move {
+                operations::wait_for_tx_mined(
+                    operations::DEFAULT_L2_NETWORK_URL_NO_FB,
+                    &signed_tx_clone,
+                )
                 .await?;
-            <Result<u128>>::Ok(start.elapsed().as_millis())
-        });
+                <Result<u128>>::Ok(start.elapsed().as_millis())
+            })
+            .await
+            .expect("timeout waiting for tx to be mined")
+        };
 
-        let non_fb_duration = tokio::time::timeout(TX_CONFIRMATION_TIMEOUT, async move {
-            operations::wait_for_tx_mined(
-                operations::DEFAULT_L2_NETWORK_URL_NO_FB,
-                &signed_tx_clone,
-            )
-            .await?;
-            <Result<u128>>::Ok(start_clone.elapsed().as_millis())
-        });
-
-        let fb_duration = fb_duration.await.expect("timeout waiting for tx to be mined").unwrap();
-        let non_fb_duration =
-            non_fb_duration.await.expect("timeout waiting for tx to be mined").unwrap();
+        let (fb_duration, non_fb_duration) = tokio::join!(fb_future, non_fb_future);
+        let fb_duration = fb_duration.unwrap();
+        let non_fb_duration = non_fb_duration.unwrap();
         total_fb_duration += fb_duration;
         total_non_fb_duration += non_fb_duration;
 
@@ -407,7 +423,7 @@ async fn test_fb_rpc_comparison(#[case] test_name: &str) {
         "StateApi" => {
             // Setup batch ERC20 token transfers
             let num_transactions = 5;
-            let (tx_hashes, block_num, block_hash) = operations::transfer_erc20_token_batch(
+            let (_, block_num, block_hash) = operations::transfer_erc20_token_batch(
                 operations::DEFAULT_L2_NETWORK_URL_FB,
                 contracts.erc20,
                 U256::from(operations::GWEI),
