@@ -2571,6 +2571,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "delegate"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "780eb241654bf097afb00fc5f054a09b687dad862e485fdcf8399bb056565370"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.110",
+]
+
+[[package]]
 name = "der"
 version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12279,9 +12290,13 @@ dependencies = [
 name = "xlayer-reth-node"
 version = "0.1.0"
 dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-genesis",
  "alloy-primitives",
  "chrono",
  "clap",
+ "delegate",
  "eyre",
  "futures",
  "futures-util",
@@ -12292,8 +12307,23 @@ dependencies = [
  "once_cell",
  "reqwest",
  "reth",
+ "reth-chainspec",
  "reth-cli-util",
+ "reth-codecs",
+ "reth-db-api",
+ "reth-db-common",
+ "reth-engine-service",
+ "reth-engine-tree",
+ "reth-engine-util",
  "reth-exex",
+ "reth-network",
+ "reth-network-api",
+ "reth-network-peers",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-node-core",
+ "reth-node-events",
+ "reth-node-types",
  "reth-optimism-chainspec",
  "reth-optimism-cli",
  "reth-optimism-evm",
@@ -12301,8 +12331,16 @@ dependencies = [
  "reth-optimism-primitives",
  "reth-optimism-rpc",
  "reth-primitives",
+ "reth-provider",
  "reth-rpc-convert",
  "reth-rpc-eth-api",
+ "reth-stages-types",
+ "reth-static-file-types",
+ "reth-tasks",
+ "reth-tokio-util",
+ "reth-tracing",
+ "reth-trie",
+ "reth-trie-db",
  "serde",
  "serde_json",
  "time",

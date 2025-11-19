@@ -1,11 +1,13 @@
 #![allow(missing_docs, rustdoc::missing_crate_level_docs)]
 
 mod args_xlayer;
+mod genesis;
+mod xlayer_launcher;
 
 use args_xlayer::XLayerArgs;
 use clap::Parser;
 use reth::{
-    builder::{EngineNodeLauncher, Node, NodeHandle, TreeConfig},
+    builder::{Node, NodeHandle, TreeConfig},
     providers::providers::BlockchainProvider,
     version::{default_reth_version_metadata, try_init_version_metadata, RethCliVersionConsts},
 };
@@ -117,7 +119,9 @@ fn main() {
                             builder.config().engine.memory_block_buffer_target,
                         );
 
-                    let launcher = EngineNodeLauncher::new(
+                    // Use XLayer's custom launcher with custom genesis initialization
+                    use xlayer_launcher::XLayerEngineNodeLauncher;
+                    let launcher = XLayerEngineNodeLauncher::new(
                         builder.task_executor().clone(),
                         builder.config().datadir(),
                         engine_tree_config,
