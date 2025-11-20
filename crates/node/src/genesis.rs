@@ -261,6 +261,7 @@ where
             let difficulty = header.difficulty();
 
             if genesis_block_number > 0 {
+                // if genesis block number is greater than 0, we need to initialize the header static files
                 initialize_header_static_files(
                     provider,
                     &static_file_provider,
@@ -481,6 +482,7 @@ fn initialize_transactions_and_receipts_static_files(
         "Creating static file ranges for Transactions and Receipts"
     );
 
+    // initialize the transactions static file ranges
     initialize_segment_static_files(
         static_file_provider,
         StaticFileSegment::Transactions,
@@ -489,6 +491,7 @@ fn initialize_transactions_and_receipts_static_files(
         genesis_block_number,
     )?;
 
+    // initialize the receipts static file ranges
     initialize_segment_static_files(
         static_file_provider,
         StaticFileSegment::Receipts,
