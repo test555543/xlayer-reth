@@ -2,7 +2,7 @@
 
 mod args_xlayer;
 mod genesis;
-mod xlayer_launcher;
+mod launcher;
 
 use args_xlayer::XLayerArgs;
 use clap::Parser;
@@ -120,7 +120,7 @@ fn main() {
                         );
 
                     // Use XLayer's custom launcher with custom genesis initialization
-                    use xlayer_launcher::XLayerEngineNodeLauncher;
+                    use launcher::XLayerEngineNodeLauncher;
                     let launcher = XLayerEngineNodeLauncher::new(
                         builder.task_executor().clone(),
                         builder.config().datadir(),
