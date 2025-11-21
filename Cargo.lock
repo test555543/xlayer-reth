@@ -12312,6 +12312,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "xlayer-chainspec"
+version = "0.1.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-genesis",
+ "alloy-primitives",
+ "eyre",
+ "once_cell",
+ "op-alloy-rpc-types",
+ "reth-chainspec",
+ "reth-cli",
+ "reth-optimism-chainspec",
+ "reth-optimism-cli",
+ "reth-optimism-forks",
+ "reth-optimism-primitives",
+ "reth-primitives-traits",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "xlayer-e2e-test"
 version = "0.1.0"
 dependencies = [
@@ -12407,6 +12429,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "xlayer-chainspec",
  "xlayer-innertx",
 ]
 

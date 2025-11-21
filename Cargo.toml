@@ -15,7 +15,8 @@ resolver = "2"
 members = [
     "crates/node",
     "crates/tests",
-    "crates/innertx", 
+    "crates/innertx",
+    "crates/chainspec",
 ]
 default-members = ["crates/node"]
 
@@ -51,6 +52,7 @@ codegen-units = 1
 
 xlayer-reth-node = { path = "crates/node" }
 xlayer-innertx = { path = "crates/innertx" }
+xlayer-chainspec = { path = "crates/chainspec" }
 
 # ------------------------------------------------------------------------------
 # Reth Dependencies (points to our fork)
@@ -69,6 +71,7 @@ reth-provider = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2
 reth-tracing = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
 reth-primitives-traits = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
 reth-evm = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
+reth-cli = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
 reth-cli-util = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
 reth-exex = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
 reth-db = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
@@ -76,6 +79,11 @@ reth-revm = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
 reth-storage-api = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
 reth-rpc = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
 reth-node-api = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
+reth-node-builder = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
+reth-node-core = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
+reth-node-types = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
+reth-chainspec = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
+reth-optimism-forks = { git = "https://github.com/okx/reth", branch = "upstream/v1.9.2" }
 
 # ------------------------------------------------------------------------------
 # Revm Dependencies (follows upstream reth)
