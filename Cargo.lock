@@ -208,9 +208,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-eips"
-version = "1.1.1"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e867b5fd52ed0372a95016f3a37cbff95a9d5409230fbaef2d8ea00e8618098"
+checksum = "4bd2c7ae05abcab4483ce821f12f285e01c0b33804e6883dd9ca1569a87ee2be"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -256,9 +256,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-genesis"
-version = "1.1.1"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b90be17e9760a6ba6d13cebdb049cea405ebc8bf57d90664ed708cc5bc348342"
+checksum = "fc47eaae86488b07ea8e20236184944072a78784a1f4993f8ec17b3aa5d08c21"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -683,9 +683,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-serde"
-version = "1.1.1"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01e856112bfa0d9adc85bd7c13db03fad0e71d1d6fb4c2010e475b6718108236"
+checksum = "a6f180c399ca7c1e2fe17ea58343910cad0090878a696ff5a50241aee12fc529"
 dependencies = [
  "alloy-primitives",
  "serde",
