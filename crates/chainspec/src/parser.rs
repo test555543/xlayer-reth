@@ -10,7 +10,7 @@ use std::sync::Arc;
 ///
 /// This parser extends the default OpChainSpecParser to support XLayer chains:
 /// - xlayer-mainnet (chain id 196)
-/// - xlayer-testnet (chain id 195)
+/// - xlayer-testnet (chain id 1952)
 ///
 /// It also supports all standard Optimism chains through delegation to the
 /// upstream OpChainSpecParser.
