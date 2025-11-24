@@ -46,7 +46,7 @@ let mainnet_spec = &*XLAYER_MAINNET;
 assert_eq!(mainnet_spec.chain().id(), 196);
 
 let testnet_spec = &*XLAYER_TESTNET;
-assert_eq!(testnet_spec.chain().id(), 195);
+assert_eq!(testnet_spec.chain().id(), 1952);
 ```
 
 ### Command Line
