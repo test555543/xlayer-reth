@@ -1,1 +1,18 @@
+# Rust build artifacts
 target/
+
+# Git
+.git/
+.gitignore
+
+# IDE & System
+.cursor/
+.DS_Store
+
+# Docker
+Dockerfile*
+.dockerignore
+
+# Documentation
+*.md
+docs/
