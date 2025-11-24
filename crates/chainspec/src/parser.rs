@@ -92,7 +92,7 @@ mod tests {
     #[test]
     fn test_parse_xlayer_testnet() {
         let spec = XLayerChainSpecParser::parse("xlayer-testnet").unwrap();
-        assert_eq!(spec.chain().id(), 195);
+        assert_eq!(spec.chain().id(), 1952);
     }
 
     #[test]
