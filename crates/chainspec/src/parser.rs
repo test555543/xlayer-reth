@@ -3,8 +3,9 @@
 use crate::{XLAYER_MAINNET, XLAYER_TESTNET};
 use alloy_genesis::Genesis;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_chainspec::{generated_chain_value_parser, OpChainSpec};
 use std::sync::Arc;
+use tracing::debug;
 
 /// XLayer chain specification parser
 ///
@@ -42,22 +43,28 @@ impl ChainSpecParser for XLayerChainSpecParser {
 
 /// Parse genesis from file path or JSON string
 fn parse_genesis(s: &str) -> eyre::Result<Genesis> {
-    // Try to parse as file path first
-    if let Ok(contents) = std::fs::read_to_string(s) {
-        return serde_json::from_str(&contents)
-            .map_err(|e| eyre::eyre!("Failed to parse genesis file: {}", e));
+    // Use the standard reth parse_genesis to maintain compatibility
+    let mut genesis = reth_cli::chainspec::parse_genesis(s)?;
+
+    // XLayer extension: If legacyXLayerBlock is specified in config, override genesis.number
+    // This allows XLayer to migrate from a legacy chain by setting the genesis
+    // block number to match the legacy chain's starting block.
+    if let Some(legacy_block_value) = genesis.config.extra_fields.get("legacyXLayerBlock") {
+        if let Some(legacy_block) = legacy_block_value.as_u64() {
+            debug!("Overriding genesis.number from {:?} to {legacy_block}", genesis.number);
+            genesis.number = Some(legacy_block);
+        }
     }
 
-    // Try to parse as JSON string
-    serde_json::from_str(s).map_err(|e| eyre::eyre!("Failed to parse genesis JSON: {}", e))
+    Ok(genesis)
 }
 
 /// XLayer chain value parser
 ///
 /// Parses chain specifications with the following priority:
 /// 1. XLayer named chains (xlayer-mainnet, xlayer-testnet)
-/// 2. Standard Optimism named chains (via OpChainSpecParser)
-/// 3. Genesis file path or JSON string
+/// 2. Standard Optimism named chains (via `generated_chain_value_parser`)
+/// 3. Genesis file path or JSON string (with `legacyXLayerBlock` support)
 fn xlayer_chain_value_parser(s: &str) -> eyre::Result<Arc<OpChainSpec>> {
     match s {
         "xlayer-mainnet" => {
@@ -74,8 +81,16 @@ fn xlayer_chain_value_parser(s: &str) -> eyre::Result<Arc<OpChainSpec>> {
             }
             Ok(XLAYER_TESTNET.clone())
         }
-        // Delegate to upstream OpChainSpecParser for other chains
-        _ => reth_optimism_cli::chainspec::chain_value_parser(s),
+        // For other inputs, try known OP chains first, then parse as genesis
+        _ => {
+            // Try to match known OP chains (optimism, base, etc.)
+            if let Some(op_chain_spec) = generated_chain_value_parser(s) {
+                return Ok(op_chain_spec);
+            }
+
+            // Otherwise, parse as genesis file/JSON with XLayer extensions
+            Ok(Arc::new(parse_genesis(s)?.into()))
+        }
     }
 }
 
@@ -120,5 +135,94 @@ mod tests {
         for &chain in XLayerChainSpecParser::SUPPORTED_CHAINS {
             assert!(XLayerChainSpecParser::parse(chain).is_ok(), "Failed to parse {chain}");
         }
+    }
+
+    #[test]
+    fn test_legacy_xlayer_block_override() {
+        use serde_json::json;
+
+        // Create a genesis JSON with legacyXLayerBlock
+        let genesis_json = json!({
+            "config": {
+                "chainId": 196,
+                "homesteadBlock": 0,
+                "eip150Block": 0,
+                "eip155Block": 0,
+                "eip158Block": 0,
+                "byzantiumBlock": 0,
+                "constantinopleBlock": 0,
+                "petersburgBlock": 0,
+                "istanbulBlock": 0,
+                "berlinBlock": 0,
+                "londonBlock": 0,
+                "legacyXLayerBlock": 12345
+            },
+            "nonce": "0x0",
+            "timestamp": "0x0",
+            "extraData": "0x",
+            "gasLimit": "0x1000000",
+            "difficulty": "0x0",
+            "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "coinbase": "0x0000000000000000000000000000000000000000",
+            "alloc": {},
+            "number": "0x0"
+        });
+
+        let genesis_str = serde_json::to_string(&genesis_json).unwrap();
+        let result = parse_genesis(&genesis_str);
+
+        assert!(result.is_ok(), "Failed to parse genesis with legacyXLayerBlock");
+        let genesis = result.unwrap();
+
+        // Verify that genesis.number was overridden to legacyXLayerBlock value
+        assert_eq!(
+            genesis.number,
+            Some(12345),
+            "genesis.number should be overridden by legacyXLayerBlock"
+        );
+    }
+
+    #[test]
+    fn test_genesis_without_legacy_block() {
+        use serde_json::json;
+
+        // Create a genesis JSON without legacyXLayerBlock
+        let genesis_json = json!({
+            "config": {
+                "chainId": 196,
+                "homesteadBlock": 0,
+                "eip150Block": 0,
+                "eip155Block": 0,
+                "eip158Block": 0,
+                "byzantiumBlock": 0,
+                "constantinopleBlock": 0,
+                "petersburgBlock": 0,
+                "istanbulBlock": 0,
+                "berlinBlock": 0,
+                "londonBlock": 0
+            },
+            "nonce": "0x0",
+            "timestamp": "0x0",
+            "extraData": "0x",
+            "gasLimit": "0x1000000",
+            "difficulty": "0x0",
+            "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "coinbase": "0x0000000000000000000000000000000000000000",
+            "alloc": {},
+            "number": "0x64"
+        });
+
+        let genesis_str = serde_json::to_string(&genesis_json).unwrap();
+        let result = parse_genesis(&genesis_str);
+
+        assert!(result.is_ok(), "Failed to parse genesis without legacyXLayerBlock");
+        let genesis = result.unwrap();
+
+        // Verify that genesis.number remains unchanged (0x64 = 100)
+        assert_eq!(
+            genesis.number,
+            Some(100),
+            "genesis.number should remain unchanged when legacyXLayerBlock is not present"
+        );
     }
 }
