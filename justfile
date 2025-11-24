@@ -73,7 +73,7 @@ clean:
 
 build-docker:
     @rm -rf .cargo  # Clean dev mode files
-    docker build -t op-reth:xlayer -f Dockerfile .
+    docker build -t op-reth:latest -f Dockerfile .
 
 [no-exit-message]
 build-docker-dev reth_path="":
@@ -110,7 +110,7 @@ build-docker-dev reth_path="":
     # Generate config with /reth path (Docker will move .cargo/reth to /reth to avoid nesting)
     sed "s|RETH_PATH_PLACEHOLDER|/reth|g" .reth-dev.toml > .cargo/config.toml
     echo "🐳 Building Docker image..."
-    docker build -t op-reth:xlayer-dev -f Dockerfile .
+    docker build -t op-reth:latest -f Dockerfile .
 
 watch-test:
     cargo watch -x test
