@@ -12333,6 +12333,7 @@ dependencies = [
  "reth-primitives-traits",
  "serde",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
