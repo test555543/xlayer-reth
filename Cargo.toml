@@ -12,7 +12,12 @@ repository = "https://github.com/okx/xlayer-reth.git"
 
 [workspace]
 resolver = "2"
-members = ["crates/node", "crates/tests", "crates/innertx", "crates/chainspec"]
+members = [
+    "crates/node",
+    "crates/tests",
+    "crates/innertx",
+    "crates/chainspec",
+]
 default-members = ["crates/node"]
 
 [workspace.lints]
