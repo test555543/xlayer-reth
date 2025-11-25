@@ -94,7 +94,10 @@ build-docker-dev reth_path="":
     fi
     # Sync if source path exists
     [ -z "$RETH_SRC" ] && just build-docker && exit 0
-    just check-dev-template && mkdir -p .cargo
+
+    just check-dev-template
+    mkdir -p .cargo
+    
     echo "$RETH_SRC" > "$PATH_FILE"
     echo "📦 Syncing $RETH_SRC → .cargo/reth..."
     rsync -au --delete --exclude='.git' --exclude='target' "$RETH_SRC/" .cargo/reth/
