@@ -135,10 +135,10 @@ fn main() {
                     ctx.modules.merge_configured(custom_rpc.into_rpc())?;
                     info!(target:"reth::cli", "xlayer innertx rpc enabled");
 
-                    // Register XLayer RPC extension for eth_minGasPrice
+                    // Register XLayer RPC
                     let xlayer_rpc = XlayerRpcExt { backend: Arc::new(new_op_eth_api) };
                     ctx.modules.merge_configured(xlayer_rpc.into_rpc())?;
-                    info!(target:"reth::cli", "xlayer rpc extension enabled (eth_minGasPrice)");
+                    info!(target:"reth::cli", "xlayer rpc extension enabled");
 
                     info!(message = "XLayer RPC modules initialized");
                     Ok(())
