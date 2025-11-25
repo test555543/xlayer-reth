@@ -8,6 +8,38 @@ use jsonrpsee::{
 use reqwest::Client;
 use std::sync::Arc;
 
+#[inline]
+pub fn is_legacy_routable(method: &str) -> bool {
+    matches!(
+        method,
+        "eth_getBlockByNumber"
+            | "eth_getBlockByHash"
+            | "eth_getBlockTransactionCountByNumber"
+            | "eth_getBlockTransactionCountByHash"
+            | "eth_getBlockReceipts"
+            | "eth_getHeaderByNumber"
+            | "eth_getHeaderByHash"
+            | "eth_getTransactionByHash"
+            | "eth_getTransactionReceipt"
+            | "eth_getTransactionByBlockHashAndIndex"
+            | "eth_getTransactionByBlockNumberAndIndex"
+            | "eth_getRawTransactionByHash"
+            | "eth_getRawTransactionByBlockHashAndIndex"
+            | "eth_getRawTransactionByBlockNumberAndIndex"
+            | "eth_getBalance"
+            | "eth_getCode"
+            | "eth_getStorageAt"
+            | "eth_getTransactionCount"
+            | "eth_call"
+            | "eth_estimateGas"
+            | "eth_createAccessList"
+            | "eth_getLogs"
+            | "eth_getInternalTransactions"
+            | "eth_getBlockInternalTransactions"
+            | "eth_transactionPreExec"
+    )
+}
+
 /// Configuration for legacy RPC routing
 #[derive(Clone, Debug)]
 pub struct LegacyRpcRouterConfig {
@@ -77,8 +109,10 @@ impl<S> LegacyRpcRouterService<S> {
             return false;
         }
 
-        // TODO: We may want to filter certain methods.
-        let _method = req.method_name();
+        let method = req.method_name();
+        if !is_legacy_routable(method) {
+            return false;
+        }
 
         // Check block number against cutoff
         if let Some(block_num) = self.extract_block_number(req) {

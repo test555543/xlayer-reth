@@ -22,8 +22,8 @@ use xlayer_innertx::{
     exex_utils::post_exec_exex_inner_tx,
     rpc_utils::{XlayerInnerTxExt, XlayerInnerTxExtApiServer},
 };
-use xlayer_rpc::xlayer_ext::{XlayerRpcExt, XlayerRpcExtApiServer};
 use xlayer_legacy_rpc::{layer::LegacyRpcRouterLayer, LegacyRpcRouterConfig};
+use xlayer_rpc::xlayer_ext::{XlayerRpcExt, XlayerRpcExtApiServer};
 
 pub const XLAYER_RETH_CLIENT_VERSION: &str = concat!("xlayer/v", env!("CARGO_PKG_VERSION"));
 
@@ -147,7 +147,6 @@ fn main() {
 
                     let new_op_eth_api = Arc::new(ctx.registry.eth_api().clone());
 
-                    // TODO: implement legacy rpc routing for innertx rpc
                     if args.xlayer_args.enable_inner_tx {
                         let custom_rpc = XlayerInnerTxExt { backend: new_op_eth_api.clone() };
                         ctx.modules.merge_configured(custom_rpc.into_rpc())?;
