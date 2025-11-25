@@ -12392,6 +12392,7 @@ dependencies = [
  "eyre",
  "futures",
  "futures-util",
+ "humantime",
  "itertools 0.14.0",
  "jsonrpsee",
  "metrics",
@@ -12420,6 +12421,7 @@ dependencies = [
  "url",
  "uuid",
  "xlayer-innertx",
+ "xlayer-legacy-rpc",
 ]
 
 [[package]]

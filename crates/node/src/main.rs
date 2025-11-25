@@ -22,6 +22,7 @@ use xlayer_innertx::{
     exex_utils::post_exec_exex_inner_tx,
     rpc_utils::{XlayerInnerTxExt, XlayerInnerTxExtApiServer},
 };
+use xlayer_legacy_rpc::{layer::LegacyRpcRouterLayer, LegacyRpcRouterConfig};
 
 pub const XLAYER_RETH_CLIENT_VERSION: &str = concat!("xlayer/v", env!("CARGO_PKG_VERSION"));
 
@@ -105,10 +106,26 @@ fn main() {
                 }
             }
 
+            let legacy_config = LegacyRpcRouterConfig {
+                enabled: args.xlayer_args.legacy.legacy_rpc_enabled,
+                legacy_endpoint: args.xlayer_args.legacy.legacy_rpc_url.unwrap_or_default(),
+                cutoff_block: 1_000_000, // TODO: read from genesis spec
+                timeout: args.xlayer_args.legacy.legacy_rpc_timeout,
+            };
+
+            // Build add-ons with RPC middleware
+            // If not enabled, the layer will not do any re-routing.
+            let add_ons = op_node.add_ons()
+                .with_rpc_middleware(LegacyRpcRouterLayer::new(legacy_config));
+
+            if args.xlayer_args.legacy.legacy_rpc_enabled {
+                info!(target:"reth::cli", "xlayer legacy rpc enabled");
+            }
+
             let NodeHandle { node: _node, node_exit_future } = builder
                 .with_types_and_provider::<OpNode, BlockchainProvider<_>>()
                 .with_components(op_node.components())
-                .with_add_ons(op_node.add_ons())
+                .with_add_ons(add_ons)
                 .on_component_initialized(move |_ctx| {
                     // TODO: Initialize XLayer components here
                     // - Bridge intercept configuration

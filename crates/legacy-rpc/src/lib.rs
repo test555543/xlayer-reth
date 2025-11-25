@@ -11,6 +11,7 @@ use std::sync::Arc;
 /// Configuration for legacy RPC routing
 #[derive(Clone, Debug)]
 pub struct LegacyRpcRouterConfig {
+    pub enabled: bool,
     pub legacy_endpoint: String,
     pub cutoff_block: u64,
     pub timeout: std::time::Duration,
@@ -71,6 +72,11 @@ impl<S> LegacyRpcRouterService<S> {
     }
 
     fn should_route_to_legacy(&self, req: &Request<'_>) -> bool {
+        // If legacy not enabled, do not route.
+        if !self.config.enabled {
+            return false;
+        }
+
         // TODO: We may want to filter certain methods.
         let _method = req.method_name();
 

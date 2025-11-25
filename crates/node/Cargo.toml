@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 # internal
 xlayer-innertx.workspace = true
+xlayer-legacy-rpc.workspace = true
 
 # reth
 reth.workspace = true
@@ -59,6 +60,7 @@ uuid.workspace = true
 time.workspace = true
 chrono.workspace = true
 once_cell.workspace = true
+humantime.workspace = true
 
 [features]
 default = []
