@@ -27,6 +27,7 @@ fn need_parse_block(method: &str) -> bool {
             | "eth_call"
             | "eth_estimateGas"
             | "eth_createAccessList"
+            | "eth_transactionPreExec"
     )
 }
 
@@ -43,6 +44,7 @@ fn need_get_block(method: &str) -> bool {
             | "eth_call"
             | "eth_estimateGas"
             | "eth_createAccessList"
+            | "eth_transactionPreExec"
     )
 }
 
@@ -75,6 +77,7 @@ where
             }
 
             if need_parse_block(&method) {
+                // TODO: set param index based on method
                 let block_param = crate::parse_block_param(params, 0, config.cutoff_block);
                 if let Some(block_param) = block_param {
                     // Clone to prevent lifetime error
