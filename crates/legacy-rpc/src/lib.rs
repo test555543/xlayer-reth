@@ -4,11 +4,13 @@ pub mod service;
 use std::sync::Arc;
 
 use jsonrpsee::{
-    MethodResponse, core::middleware::RpcServiceT, types::{ErrorObject, Request}
+    core::middleware::RpcServiceT,
+    types::{ErrorObject, Request},
+    MethodResponse,
 };
+use jsonrpsee_types::Id;
 use reqwest::Client;
 use serde_json::value::RawValue;
-use jsonrpsee_types::Id;
 
 #[inline]
 pub fn is_legacy_routable(method: &str) -> bool {
