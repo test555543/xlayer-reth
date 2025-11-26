@@ -108,10 +108,14 @@ fn main() {
                 }
             }
 
+            let chain_spec = builder.config().chain.clone();
+            let genesis_block = chain_spec.genesis().number.unwrap();
+            info!("XLayer genesis block = {}", genesis_block);
+
             let legacy_config = LegacyRpcRouterConfig {
                 enabled: args.xlayer_args.legacy.legacy_rpc_enabled,
                 legacy_endpoint: args.xlayer_args.legacy.legacy_rpc_url.unwrap_or_default(),
-                cutoff_block: 1_000_000, // TODO: read from genesis spec
+                cutoff_block: genesis_block,
                 timeout: args.xlayer_args.legacy.legacy_rpc_timeout,
             };
 
