@@ -6,6 +6,7 @@ use jsonrpsee::{
     types::Request,
     MethodResponse,
 };
+use tracing::{debug};
 
 use crate::LegacyRpcRouterService;
 
@@ -108,6 +109,7 @@ where
             if need_parse_block(&method) {
                 let block_param =
                     crate::parse_block_param(params, block_param_pos(&method), config.cutoff_block);
+                // debug!("need parse block");
                 if let Some(block_param) = block_param {
                     // Clone to prevent lifetime error
                     let service = LegacyRpcRouterService {
@@ -115,27 +117,39 @@ where
                         config: config.clone(),
                         client: client.clone(),
                     };
+
                     // Only some methods that need to get block from DB do this.
                     if need_get_block(&method) && crate::is_block_hash(&block_param) {
-                        // If failed to get block number internally, route to legacy then.
-                        if service
-                            .call_eth_get_block_by_hash(&block_param, false)
-                            .await
-                            .ok()
-                            .is_none()
-                        {
-                            let service = LegacyRpcRouterService { inner, config, client };
-                            return service.forward_to_legacy(req).await;
+                        let res = service.call_eth_get_block_by_hash(&block_param, false).await;
+
+                        match res {
+                            Ok(n) => {
+                                if n.is_none() {
+                                    debug!("Route to legacy for method = {}", method);
+                                    let service = LegacyRpcRouterService { inner, config, client };
+                                    return service.forward_to_legacy(req).await;
+                                } else {
+                                    // TODO: if block_num parsed from blk hash is smaller than
+                                    // cutoff, route to legacy as well?
+                                    debug!("No route to legacy since got block num from block hash. block = {}", n.unwrap());
+                                }
+                            }
+                            Err(err) => debug!("Error getting block by hash = {err:?}")
                         }
                     } else {
                         let block_num = block_param.parse::<u64>().unwrap();
+                        debug!("block_num = {}", block_num);
                         if block_num < service.config.cutoff_block {
+                            debug!("Route to legacy for method (below cuttoff) = {}", method);
                             return service.forward_to_legacy(req).await;
                         }
                     }
+                } else {
+                    debug!("Failed to parse block param, got None");
                 }
             }
 
+            debug!("No legacy routing for method = {}", method);
             // Default resorts to normal rpc calls.
             inner.call(req).await
         })
