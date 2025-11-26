@@ -55,7 +55,7 @@ xlayer-reth-node = { path = "crates/node" }
 xlayer-innertx = { path = "crates/innertx" }
 xlayer-chainspec = { path = "crates/chainspec" }
 xlayer-rpc = { path = "crates/rpc" }
-reth-apollo = { path = "crates/apollo" }
+xlayer-apollo = { path = "crates/apollo" }
 
 # ------------------------------------------------------------------------------
 # Reth Dependencies (points to our fork)

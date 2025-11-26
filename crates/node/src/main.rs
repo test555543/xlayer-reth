@@ -14,7 +14,7 @@ use reth::{
     providers::providers::BlockchainProvider,
     version::{default_reth_version_metadata, try_init_version_metadata, RethCliVersionConsts},
 };
-use reth_apollo::{ApolloConfig, ApolloService};
+use xlayer_apollo::{ApolloConfig, ApolloService};
 use reth_optimism_cli::Cli;
 use reth_optimism_node::{args::RollupArgs, OpNode};
 use xlayer_chainspec::XLayerChainSpecParser;
@@ -169,11 +169,11 @@ fn main() {
 }
 
 async fn run_apollo(apollo_args: &ApolloArgs) {
-    tracing::info!(target: "reth::apollo", "[Apollo] Apollo enabled: {:?}", apollo_args.enabled);
-    tracing::info!(target: "reth::apollo", "[Apollo] Apollo app ID: {:?}", apollo_args.apollo_app_id);
-    tracing::info!(target: "reth::apollo", "[Apollo] Apollo IP: {:?}", apollo_args.apollo_ip);
-    tracing::info!(target: "reth::apollo", "[Apollo] Apollo cluster: {:?}", apollo_args.apollo_cluster);
-    tracing::info!(target: "reth::apollo", "[Apollo] Apollo namespace: {:?}", apollo_args.apollo_namespace);
+    tracing::info!(target: "xlayer-apollo", "[Apollo] Apollo enabled: {:?}", apollo_args.enabled);
+    tracing::info!(target: "xlayer-apollo", "[Apollo] Apollo app ID: {:?}", apollo_args.apollo_app_id);
+    tracing::info!(target: "xlayer-apollo", "[Apollo] Apollo IP: {:?}", apollo_args.apollo_ip);
+    tracing::info!(target: "xlayer-apollo", "[Apollo] Apollo cluster: {:?}", apollo_args.apollo_cluster);
+    tracing::info!(target: "xlayer-apollo", "[Apollo] Apollo namespace: {:?}", apollo_args.apollo_namespace);
 
     // Create Apollo config from args
     let apollo_config = ApolloConfig {
@@ -184,12 +184,12 @@ async fn run_apollo(apollo_args: &ApolloArgs) {
         secret: None,
     };
 
-    tracing::info!(target: "reth::apollo", "[Apollo] Creating Apollo config");
+    tracing::info!(target: "xlayer-apollo", "[Apollo] Creating Apollo config");
 
     // Initialize Apollo singleton
     if let Err(e) = ApolloService::try_initialize(apollo_config).await {
-        tracing::error!(target: "reth::apollo", "[Apollo] Failed to initialize Apollo: {:?}; Proceeding with node launch without Apollo", e);
+        tracing::error!(target: "xlayer-apollo", "[Apollo] Failed to initialize Apollo: {:?}; Proceeding with node launch without Apollo", e);
     } else {
-        tracing::info!(target: "reth::apollo", "[Apollo] Apollo initialized successfully")
+        tracing::info!(target: "xlayer-apollo", "[Apollo] Apollo initialized successfully")
     }
 }

@@ -73,16 +73,16 @@ impl ApolloService {
     /// Create new instance
     async fn try_new_instance(config: ApolloConfig) -> Result<ApolloService, ApolloError> {
         // Validate configuration
-        if config.app_id.is_empty() ||
-            config.meta_server.is_empty() ||
-            config.cluster_name.is_empty()
+        if config.app_id.is_empty()
+            || config.meta_server.is_empty()
+            || config.cluster_name.is_empty()
         {
             return Err(ApolloError::ClientInit(
                 "apollo enabled but config is not valid".to_string(),
             ));
         }
 
-        info!(target: "reth::apollo", "[Apollo] Namespaces: {:?}", config.namespaces);
+        info!(target: "xlayer-apollo", "[Apollo] Namespaces: {:?}", config.namespaces);
 
         let client: ApolloConfigClient = apollo_sdk::client::apollo_config_client::new(
             config.meta_server.iter().map(|s| s.as_str()).collect(),
@@ -93,7 +93,7 @@ impl ApolloService {
         )
         .await
         .map_err(|e| {
-            error!(target: "reth::apollo", "[Apollo] Failed to create client: {:?}", e);
+            error!(target: "xlayer-apollo", "[Apollo] Failed to create client: {:?}", e);
             ApolloError::ClientInit(format!("Failed to connect to Apollo: Check if Apollo service is accessible or whether Apollo configuration for desired namespace is released."))
         })?;
 
@@ -139,7 +139,7 @@ impl ApolloService {
                 // Get config cache for namespace
                 Self::update_cache_from_config(&self.cache, namespace, &config);
             } else {
-                warn!(target: "reth::apollo", "[Apollo] No config found for namespace {}", namespace);
+                warn!(target: "xlayer-apollo", "[Apollo] No config found for namespace {}", namespace);
             }
         }
 
@@ -159,7 +159,7 @@ impl ApolloService {
         // Start listening to all namespaces
         for (namespace, full_namespace) in &namespace_map {
             if let Some(err) = client.listen_namespace(full_namespace).await {
-                warn!(target: "reth::apollo", "[Apollo] Failed to listen to namespace {}: {:?}", namespace, err);
+                warn!(target: "xlayer-apollo", "[Apollo] Failed to listen to namespace {}: {:?}", namespace, err);
             }
         }
 
@@ -173,7 +173,7 @@ impl ApolloService {
 
         state.task = Some(task);
 
-        info!(target: "reth::apollo", "[Apollo] Started listening to configuration changes");
+        info!(target: "xlayer-apollo", "[Apollo] Started listening to configuration changes");
         Ok(())
     }
 
@@ -187,7 +187,7 @@ impl ApolloService {
             interval.tick().await;
 
             if let Some(change_event) = client.fetch_change_event() {
-                info!(target: "reth::apollo", "[Apollo] Configuration change detected: {:?}", change_event);
+                info!(target: "xlayer-apollo", "[Apollo] Configuration change detected: {:?}", change_event);
                 Self::fetch_and_update_configs(&client, &cache, &namespace_map).await;
             }
         }
@@ -206,7 +206,7 @@ impl ApolloService {
             if let Some(config) = config {
                 Self::update_cache_from_config(&cache, namespace, &config);
             } else {
-                warn!(target: "reth::apollo", "[Apollo] get_config returned None for namespace {}. This may happen if the namespace format doesn't match.", namespace);
+                warn!(target: "xlayer-apollo", "[Apollo] get_config returned None for namespace {}. This may happen if the namespace format doesn't match.", namespace);
             }
         }
     }
@@ -227,7 +227,7 @@ impl ApolloService {
                 }
             }
             Err(e) => {
-                error!(target: "reth::apollo", "[Apollo] Failed to parse YAML for namespace {}: {}", namespace, e);
+                error!(target: "xlayer-apollo", "[Apollo] Failed to parse YAML for namespace {}: {}", namespace, e);
             }
         }
     }
@@ -235,7 +235,7 @@ impl ApolloService {
     /// Try to get cached config from cache
     pub fn try_get_cached_config(&self, namespace: &str, key: &str) -> Option<ConfigValue> {
         let cache_key = make_cache_key(namespace, key);
-        debug!(target: "reth::apollo", "[Apollo] Getting cached config for namespace {}: key: {:?}", namespace, cache_key);
+        debug!(target: "xlayer-apollo", "[Apollo] Getting cached config for namespace {}: key: {:?}", namespace, cache_key);
         self.cache.get(&cache_key)
     }
 }

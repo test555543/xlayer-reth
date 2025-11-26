@@ -1,5 +1,5 @@
 [package]
-name = "reth-apollo"
+name = "xlayer-apollo"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

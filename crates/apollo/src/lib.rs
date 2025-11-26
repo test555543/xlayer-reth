@@ -30,7 +30,7 @@ macro_rules! apollo_config_or {
             .and_then(|v| $crate::types::FromConfigValue::try_from_config_value(&v))
             .unwrap_or_else( || {
                 tracing::warn!(
-                    target: "reth::apollo",
+                    target: "xlayer-apollo",
                     namespace = ns_ref,
                     key = $key,
                     default = ?$default,

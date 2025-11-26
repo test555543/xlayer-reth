@@ -6555,23 +6555,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-apollo"
-version = "0.1.0"
-dependencies = [
- "apollo-sdk",
- "async-once-cell",
- "eyre",
- "moka",
- "serde",
- "serde_json",
- "serde_yaml",
- "thiserror 2.0.17",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
 name = "reth-basic-payload-builder"
 version = "1.9.3"
 source = "git+https://github.com/okx/reth?branch=upstream%2Fdev#8e68a5c86711e4c7a95d179ff7dec2c873aa3e05"
@@ -12624,6 +12607,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "xlayer-apollo"
+version = "0.1.0"
+dependencies = [
+ "apollo-sdk",
+ "async-once-cell",
+ "eyre",
+ "moka",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "xlayer-chainspec"
 version = "0.1.0"
 dependencies = [
@@ -12724,7 +12724,6 @@ dependencies = [
  "once_cell",
  "reqwest 0.12.24",
  "reth",
- "reth-apollo",
  "reth-cli-util",
  "reth-exex",
  "reth-optimism-chainspec",
@@ -12745,6 +12744,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "xlayer-apollo",
  "xlayer-chainspec",
  "xlayer-innertx",
  "xlayer-rpc",
