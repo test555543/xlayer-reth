@@ -157,7 +157,10 @@ where
                         match res {
                             Ok(n) => {
                                 if n.is_none() {
-                                    debug!("Route to legacy for method (block by hash not found) = {}", method);
+                                    debug!(
+                                        "Route to legacy for method (block by hash not found) = {}",
+                                        method
+                                    );
                                     let service = LegacyRpcRouterService { inner, config, client };
                                     return service.forward_to_legacy(req).await;
                                 } else {
@@ -173,10 +176,13 @@ where
                             Ok(block_num) => {
                                 debug!("block_num = {}", block_num);
                                 if block_num < service.config.cutoff_block {
-                                    debug!("Route to legacy for method (below cuttoff) = {}", method);
+                                    debug!(
+                                        "Route to legacy for method (below cuttoff) = {}",
+                                        method
+                                    );
                                     return service.forward_to_legacy(req).await;
                                 }
-                            },
+                            }
                             Err(err) => debug!("Failed to parse block num, err = {err:?}"),
                         }
                     }
