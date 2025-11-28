@@ -27,6 +27,7 @@
 use jsonrpsee::MethodResponse;
 use jsonrpsee_types::{Id, Request};
 use serde_json::value::RawValue;
+use tracing::debug;
 
 /// Parse a block number string to u64
 /// Returns None for "latest", "pending", "safe", "finalized"
@@ -220,6 +221,81 @@ pub(crate) fn merge_eth_get_logs_responses(
     let payload = jsonrpsee_types::ResponsePayload::success(&merged_result).into();
 
     MethodResponse::response(request_id, payload, usize::MAX)
+}
+
+/// Handle eth_getLogs routing logic.
+///
+/// Determines whether to route to legacy, local, or use hybrid approach
+/// based on the block range in the request.
+pub(crate) async fn handle_eth_get_logs<S>(
+    req: Request<'_>,
+    params: &str,
+    cutoff_block: u64,
+    inner: S,
+    service: crate::LegacyRpcRouterService<S>,
+) -> MethodResponse
+where
+    S: jsonrpsee::server::middleware::rpc::RpcServiceT<MethodResponse = MethodResponse>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+{
+    if let Some((from_block, to_block)) = parse_eth_get_logs_params(params) {
+        if to_block < cutoff_block {
+            debug!(
+                "eth_getLogs pure legacy routing (from_block = {}, to_block = {})",
+                from_block, to_block
+            );
+            // Pure legacy
+            return service.forward_to_legacy(req).await;
+        } else if from_block >= cutoff_block {
+            debug!(
+                "eth_getLogs pure local routing (from_block = {}, to_block = {})",
+                from_block, to_block
+            );
+            // Pure local
+            return inner.call(req).await;
+        } else {
+            // Hybrid: split into two requests
+
+            // 1. Legacy request: fromBlock to cutoff-1
+            let legacy_req =
+                modify_eth_get_logs_params(&req, Some(from_block), Some(cutoff_block - 1));
+
+            // 2. Local request: cutoff to toBlock
+            let local_req = modify_eth_get_logs_params(&req, Some(cutoff_block), Some(to_block));
+
+            if let (Some(legacy_req), Some(local_req)) = (legacy_req, local_req) {
+                debug!(
+                    "eth_getLogs hybrid routing (from_block = {}, {}) and ({}, to_block = {})",
+                    from_block,
+                    cutoff_block - 1,
+                    cutoff_block,
+                    to_block
+                );
+
+                // Call both and merge results
+                let legacy_response = service.forward_to_legacy(legacy_req).await;
+                let local_response = inner.call(local_req).await;
+
+                // Merge the results
+                return merge_eth_get_logs_responses(
+                    legacy_response,
+                    local_response,
+                    req.id().clone(),
+                );
+            }
+
+            debug!("No legacy routing for method = eth_getLogs");
+
+            // Fallback to normal if modification failed
+            return inner.call(req).await;
+        }
+    }
+
+    // If parsing fails, use normal routing
+    inner.call(req).await
 }
 
 #[cfg(test)]
