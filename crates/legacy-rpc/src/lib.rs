@@ -112,6 +112,37 @@ impl<S> LegacyRpcRouterService<S> {
 
         Ok(block_num)
     }
+
+    pub async fn get_transaction_by_hash(
+        &self,
+        hash: &str,
+    ) -> Result<Option<String>, serde_json::Error>
+    where
+        S: RpcServiceT<MethodResponse = MethodResponse> + Send + Sync + Clone + 'static,
+    {
+        // Construct the parameters JSON string
+        let params_str = format!(r#"["{}"]"#, hash);
+        let method = "eth_getTransactionByHash";
+        let id = Id::Number(1);
+
+        // Convert params string to RawValue
+        let params_raw = match RawValue::from_string(params_str) {
+            Ok(raw) => raw,
+            Err(_) => return Ok(None),
+        };
+
+        let request = Request::owned(method.to_string(), Some(params_raw), id);
+
+        let res = self.inner.call(request).await;
+
+        let response = serde_json::from_str::<serde_json::Value>(res.as_json().get())?;
+        let txhash = response
+            .get("result")
+            .and_then(|result| result.get("hash"))
+            .and_then(|v| v.as_str().map(String::from));
+
+        Ok(txhash)
+    }
 }
 
 #[inline]
@@ -165,5 +196,112 @@ pub(crate) fn parse_block_param(params: &str, index: usize, genesis_num: u64) ->
         // decimal number not handled...
         // serde_json::Value::Number(n) => n.as_u64(),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jsonrpsee::core::middleware::RpcServiceT;
+    use jsonrpsee::types::{Id, Request};
+    use jsonrpsee::MethodResponse;
+    use std::future::Future;
+    use std::sync::Arc;
+
+    // Mock RPC service that returns predefined responses
+    #[derive(Clone)]
+    struct MockRpcService {
+        response: String,
+    }
+
+    impl RpcServiceT for MockRpcService {
+        type MethodResponse = MethodResponse;
+        type NotificationResponse = MethodResponse;
+        type BatchResponse = Vec<MethodResponse>;
+
+        fn call<'a>(
+            &self,
+            _req: Request<'a>,
+        ) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
+            let response = self.response.clone();
+            Box::pin(async move {
+                // Parse the response JSON and create a MethodResponse
+                let json: serde_json::Value = serde_json::from_str(&response).unwrap();
+                let result = json.get("result").cloned().unwrap_or(serde_json::Value::Null);
+
+                let payload = jsonrpsee_types::ResponsePayload::success(&result).into();
+                MethodResponse::response(Id::Number(1), payload, usize::MAX)
+            })
+        }
+
+        fn batch<'a>(
+            &self,
+            _req: jsonrpsee::core::middleware::Batch<'a>,
+        ) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+            Box::pin(async { vec![] })
+        }
+
+        fn notification<'a>(
+            &self,
+            _n: jsonrpsee::core::middleware::Notification<'a>,
+        ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
+            Box::pin(async {
+                MethodResponse::error(
+                    Id::Number(1),
+                    jsonrpsee::types::ErrorObjectOwned::owned(
+                        -32600,
+                        "Not implemented",
+                        None::<()>,
+                    ),
+                )
+            })
+        }
+    }
+
+    fn create_test_service(response: &str) -> LegacyRpcRouterService<MockRpcService> {
+        let config = LegacyRpcRouterConfig {
+            enabled: true,
+            legacy_endpoint: "https://testrpc.xlayer.tech/terigon".to_string(),
+            cutoff_block: 1_000_000,
+            timeout: std::time::Duration::from_secs(10),
+        };
+
+        let mock_service = MockRpcService { response: response.to_string() };
+
+        LegacyRpcRouterService {
+            inner: mock_service,
+            config: Arc::new(config),
+            client: reqwest::Client::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_transaction_by_hash_found() {
+        let response = r#"{
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "blockHash": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                "blockNumber": "0xf4240",
+                "hash": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+                "from": "0x1111111111111111111111111111111111111111",
+                "to": "0x2222222222222222222222222222222222222222"
+            }
+        }"#;
+
+        let service = create_test_service(response);
+        let tx = service
+            .get_transaction_by_hash(
+                "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+            )
+            .await;
+
+        assert!(tx.is_ok());
+        let tx = tx.unwrap();
+        assert!(tx.is_some());
+        assert_eq!(
+            tx,
+            Some("0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890".into())
+        );
     }
 }
