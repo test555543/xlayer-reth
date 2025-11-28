@@ -1,6 +1,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+pub mod block_metrics;
 pub mod db_utils;
 pub mod exex_utils;
 pub mod innertx_inspector;

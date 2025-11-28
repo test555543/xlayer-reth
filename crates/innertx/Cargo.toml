@@ -38,6 +38,7 @@ serde.workspace = true
 once_cell.workspace = true
 eyre.workspace = true
 jsonrpsee.workspace = true
+metrics.workspace = true
 
 [lints]
 workspace = true

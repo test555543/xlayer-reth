@@ -12689,6 +12689,7 @@ dependencies = [
  "eyre",
  "futures",
  "jsonrpsee",
+ "metrics",
  "once_cell",
  "reth-db",
  "reth-evm",

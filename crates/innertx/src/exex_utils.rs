@@ -16,6 +16,9 @@ use reth_revm::{database::StateProviderDatabase, primitives::alloy_primitives::T
 use reth_tracing::tracing::{error, info};
 
 use crate::{
+    block_metrics::{
+        metric_names, operation_names, stage_names, BlockMetricGuard,
+    },
     db_utils::{
         delete_single, rw_batch_delete, rw_batch_end, rw_batch_start, rw_batch_write, write_single,
     },
@@ -33,59 +36,139 @@ where
     E: ConfigureEvm<Primitives = N> + Send + Sync + 'static,
     N: NodePrimitives + 'static,
 {
-    let state_provider = provider.history_by_block_hash(block.parent_hash())?;
+    let block_number = block.header().number();
+    
+    // Record total ExEx processing time (guard will auto-record on drop)
+    let _total_guard = BlockMetricGuard::new(
+        metric_names::EXEX_TOTAL,
+        block_number,
+        stage_names::EXEX,
+        None,
+    );
+    
+    // State Provider creation monitoring
+    let state_provider = {
+        let _guard = BlockMetricGuard::new(
+            metric_names::EXEX_STATE_PROVIDER_CREATION,
+            block_number,
+            stage_names::EXEX,
+            Some(operation_names::STATE_PROVIDER),
+        );
+        provider.history_by_block_hash(block.parent_hash())?
+    };
 
-    let mut db = State::builder()
-        .with_database(StateProviderDatabase::new(&state_provider))
-        .with_bundle_update()
-        .without_state_clear()
-        .build();
+    // Database state build monitoring
+    let mut db = {
+        let _guard = BlockMetricGuard::new(
+            metric_names::EXEX_DB_STATE_BUILD,
+            block_number,
+            stage_names::EXEX,
+            None,
+        );
+        State::builder()
+            .with_database(StateProviderDatabase::new(&state_provider))
+            .with_bundle_update()
+            .without_state_clear()
+            .build()
+    };
 
-    let mut inspector = TraceCollector::default();
-    let evm_env = evm_config.evm_env(block.header())?;
+    // Inspector initialization
+    let mut inspector = {
+        let _guard = BlockMetricGuard::new(
+            metric_names::EXEX_INSPECTOR_INIT,
+            block_number,
+            stage_names::EXEX,
+            None,
+        );
+        TraceCollector::default()
+    };
+
+    // EVM environment setup
+    let evm_env = {
+        let _guard = BlockMetricGuard::new(
+            metric_names::EXEX_EVM_ENV_SETUP,
+            block_number,
+            stage_names::EXEX,
+            None,
+        );
+        evm_config.evm_env(block.header())?
+    };
+    
     let evm = evm_config.evm_with_env_and_inspector(&mut db, evm_env, &mut inspector);
-    let block_ctx = evm_config.context_for_block(&block)?;
-    let mut executor = evm_config.create_executor(evm, block_ctx);
+    
+    // Executor creation
+    let mut executor = {
+        let _guard = BlockMetricGuard::new(
+            metric_names::EXEX_EXECUTOR_CREATION,
+            block_number,
+            stage_names::EXEX,
+            None,
+        );
+        let block_ctx = evm_config.context_for_block(&block)?;
+        evm_config.create_executor(evm, block_ctx)
+    };
 
     executor.set_state_hook(None);
-    let output = executor.execute_block(block.transactions_recovered())?;
+    
+    // Block replay execution
+    let output = {
+        let _guard = BlockMetricGuard::new(
+            metric_names::EXEX_REPLAY_EXECUTION,
+            block_number,
+            stage_names::EXEX,
+            Some(operation_names::REPLAY_EXECUTION),
+        );
+        executor.execute_block(block.transactions_recovered())?
+    };
 
     let mut internal_transactions = inspector.get();
     let mut tx_hashes = Vec::<TxHash>::default();
 
-    let (rw_tx, rw_db) = rw_batch_start::<TxTable>()?;
+    // Internal transaction indexing + database batch write + single write (combined) + IO write monitoring
+    {
+        let _guard = BlockMetricGuard::new(
+            metric_names::EXEX_DB_WRITE,
+            block_number,
+            stage_names::EXEX,
+            Some(operation_names::BATCH_WRITE),
+        );
+        
+        // Internal transaction indexing (in loop)
+        let (rw_tx, rw_db) = rw_batch_start::<TxTable>()?;
 
-    let mut prev_cumulative_gas = 0u64;
-    for (index, tx) in block.transactions_recovered().enumerate() {
-        let success = output.receipts[index].status();
+        let mut prev_cumulative_gas = 0u64;
+        for (index, tx) in block.transactions_recovered().enumerate() {
+            let success = output.receipts[index].status();
 
-        let current_cumulative_gas = output.receipts[index].cumulative_gas_used();
-        let tx_gas_used = current_cumulative_gas - prev_cumulative_gas;
-        prev_cumulative_gas = current_cumulative_gas;
+            let current_cumulative_gas = output.receipts[index].cumulative_gas_used();
+            let tx_gas_used = current_cumulative_gas - prev_cumulative_gas;
+            prev_cumulative_gas = current_cumulative_gas;
 
-        if !success
-            || (!internal_transactions.is_empty() && !internal_transactions[index].is_empty())
-        {
-            if !internal_transactions.is_empty()
-                && !internal_transactions[index].is_empty()
-                && let Some(first_inner_tx) = internal_transactions[index].first_mut()
+            if !success
+                || (!internal_transactions.is_empty() && !internal_transactions[index].is_empty())
             {
-                first_inner_tx.set_transaction_gas(tx.gas_limit(), tx_gas_used);
+                if !internal_transactions.is_empty()
+                    && !internal_transactions[index].is_empty()
+                    && let Some(first_inner_tx) = internal_transactions[index].first_mut()
+                {
+                    first_inner_tx.set_transaction_gas(tx.gas_limit(), tx_gas_used);
+                }
+
+                tx_hashes.push(*tx.tx_hash());
+                rw_batch_write::<TxTable>(
+                    &rw_tx,
+                    &rw_db,
+                    tx.tx_hash().to_vec(),
+                    encode(internal_transactions[index].clone()),
+                )?;
             }
-
-            tx_hashes.push(*tx.tx_hash());
-            rw_batch_write::<TxTable>(
-                &rw_tx,
-                &rw_db,
-                tx.tx_hash().to_vec(),
-                encode(internal_transactions[index].clone()),
-            )?;
         }
+
+        rw_batch_end::<TxTable>(rw_tx)?;
+
+        write_single::<BlockTable, Vec<TxHash>>(block.hash().to_vec(), tx_hashes)?;
+        // Guards will auto-record duration when dropped
     }
-
-    rw_batch_end::<TxTable>(rw_tx)?;
-
-    write_single::<BlockTable, Vec<TxHash>>(block.hash().to_vec(), tx_hashes)?;
 
     Ok(())
 }
