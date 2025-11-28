@@ -27,8 +27,6 @@ use xlayer_innertx::{
 use xlayer_legacy_rpc::{layer::LegacyRpcRouterLayer, LegacyRpcRouterConfig};
 use xlayer_rpc::xlayer_ext::{XlayerRpcExt, XlayerRpcExtApiServer};
 
-pub const XLAYER_RETH_CLIENT_VERSION: &str = concat!("xlayer/v", env!("CARGO_PKG_VERSION"));
-
 #[global_allocator]
 static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
 
@@ -44,19 +42,12 @@ struct Args {
     pub xlayer_args: XLayerArgs,
 }
 
-fn main() {
-    reth_cli_util::sigsegv_handler::install();
+pub const XLAYER_RETH_CLIENT_VERSION: &str = concat!("xlayer/v", env!("CARGO_PKG_VERSION"));
 
-    // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
-    if std::env::var_os("RUST_BACKTRACE").is_none() {
-        unsafe {
-            std::env::set_var("RUST_BACKTRACE", "1");
-        }
-    }
-
+fn init_version_metadata() {
     let default_version_metadata = default_reth_version_metadata();
     try_init_version_metadata(RethCliVersionConsts {
-        name_client: "XLayer Reth Node".to_string().into(),
+        name_client: "XLayer Reth Export".to_string().into(),
         cargo_pkg_version: format!(
             "{}/{}",
             default_version_metadata.cargo_pkg_version,
@@ -76,6 +67,20 @@ fn main() {
         ..default_version_metadata
     })
     .expect("Unable to init version metadata");
+}
+
+fn main() {
+    reth_cli_util::sigsegv_handler::install();
+
+    // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
+    if std::env::var_os("RUST_BACKTRACE").is_none() {
+        unsafe {
+            std::env::set_var("RUST_BACKTRACE", "1");
+        }
+    }
+
+    // Initialize version metadata
+    init_version_metadata();
 
     Cli::<XLayerChainSpecParser, Args>::parse()
         .run(|builder, args| async move {

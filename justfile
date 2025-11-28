@@ -185,18 +185,53 @@ sync-dev-template reth_path:
 build-maxperf:
     RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak
 
+build-import:
+    cargo build --release --package xlayer-reth-import
+
+build-import-maxperf:
+    RUSTFLAGS="-C target-cpu=native" cargo build --package xlayer-reth-import --profile maxperf --features jemalloc,asm-keccak
+
+build-export:
+    cargo build --release --package xlayer-reth-export
+
+build-export-maxperf:
+    RUSTFLAGS="-C target-cpu=native" cargo build --package xlayer-reth-export --profile maxperf --features jemalloc,asm-keccak
+
 install:
     cargo install --path crates/node --bin xlayer-reth-node --force --locked --profile release
 
 install-maxperf:
     RUSTFLAGS="-C target-cpu=native" cargo install --path crates/node --bin xlayer-reth-node --force --locked --profile maxperf --features jemalloc,asm-keccak
 
+install-import:
+    cargo install --path crates/import --bin xlayer-reth-import --force --locked --profile release
+
+install-import-maxperf:
+    RUSTFLAGS="-C target-cpu=native" cargo install --path crates/import --bin xlayer-reth-import --force --locked --profile maxperf --features jemalloc,asm-keccak
+
+install-export:
+    cargo install --path crates/export --bin xlayer-reth-export --force --locked --profile release
+
+install-export-maxperf:
+    RUSTFLAGS="-C target-cpu=native" cargo install --path crates/export --bin xlayer-reth-export --force --locked --profile maxperf --features jemalloc,asm-keccak
+
 clean:
     cargo clean
 
-build-docker:
-    @rm -rf .cargo  # Clean dev mode files
-    docker build -t op-reth:latest -f Dockerfile .
+build-docker suffix="":
+    #!/usr/bin/env bash
+    set -e
+    rm -rf .cargo  # Clean dev mode files
+    GITHASH=$(git rev-parse --short HEAD)
+    SUFFIX=""
+    if [ -n "{{suffix}}" ]; then
+        SUFFIX="-{{suffix}}"
+    fi
+    TAG="op-reth:$GITHASH$SUFFIX"
+    echo "🐳 Building XLayer Reth Docker image: $TAG ..."
+    docker build -t $TAG -f Dockerfile .
+    docker tag $TAG op-reth:latest
+    echo "🔖 Tagged $TAG as op-reth:latest"
 
 [no-exit-message]
 build-docker-dev reth_path="":
@@ -220,16 +255,17 @@ build-docker-dev reth_path="":
 
     just check-dev-template
     mkdir -p .cargo
-    
+
     echo "$RETH_SRC" > "$PATH_FILE"
     echo "📦 Syncing $RETH_SRC → .cargo/reth..."
     rsync -au --delete --exclude='.git' --exclude='target' "$RETH_SRC/" .cargo/reth/
     echo "✅ Sync complete"
-    
+
     # Generate config with /reth path (Docker will move .cargo/reth to /reth to avoid nesting)
     sed "s|RETH_PATH_PLACEHOLDER|/reth|g" .reth-dev.toml > .cargo/config.toml
-    echo "🐳 Building Docker image..."
-    docker build -t op-reth:latest -f Dockerfile .
+
+    # Build Docker image
+    just build-docker dev
 
 watch-test:
     cargo watch -x test
