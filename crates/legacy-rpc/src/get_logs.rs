@@ -17,16 +17,13 @@
 //!    Condition: from_block < cutoff_block && to_block >= cutoff_block
 //!    Timeline:  [====== Legacy ======][cutoff][====== Local ======]
 //!    Filter:    [from -------------- across -------------- to]
+//!    Results will be sorted (eg. block num, txn index, log index).
 //!
 //! Special Cases
 //! from_block: earliest
 //!     These get converted to 0
 //! to_block: latest/pending/finalized/safe
 //!     These get converted to u64::MAX
-//!
-//! TODO: mention hybrid will do sorting and appending legacy + local
-//!
-
 use jsonrpsee::MethodResponse;
 use jsonrpsee_types::{Id, Request};
 use serde_json::value::RawValue;
