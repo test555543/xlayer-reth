@@ -128,7 +128,7 @@ pub fn modify_eth_get_logs_params<'a>(
     Some(Request::owned(
         original_req.method_name().to_string(),
         Some(params_raw),
-        original_req.id().clone(),
+        original_req.id(),
     ))
 }
 
@@ -288,7 +288,7 @@ where
                 return merge_eth_get_logs_responses(
                     legacy_response,
                     local_response,
-                    req.id().clone(),
+                    req.id(),
                 );
             }
 
