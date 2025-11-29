@@ -59,7 +59,7 @@ fn parse_block_number_string(s: &str) -> Option<u64> {
 /// - Some((u64::MAX, u64::MAX)) - neither specified (will use latest)
 /// - None - invalid params
 #[inline]
-pub(crate) fn parse_eth_get_logs_params(params: &str) -> Option<(u64, u64)> {
+fn parse_eth_get_logs_params(params: &str) -> Option<(u64, u64)> {
     let parsed: serde_json::Value = serde_json::from_str(params).ok()?;
     let arr = parsed.as_array()?;
 
@@ -90,7 +90,7 @@ pub(crate) fn parse_eth_get_logs_params(params: &str) -> Option<(u64, u64)> {
 
 /// Modify eth_getLogs request to use custom fromBlock and toBlock
 /// Returns a new Request with modified parameters
-pub fn modify_eth_get_logs_params<'a>(
+fn modify_eth_get_logs_params<'a>(
     original_req: &Request<'a>,
     from_block: Option<u64>,
     to_block: Option<u64>,
@@ -133,7 +133,7 @@ pub fn modify_eth_get_logs_params<'a>(
 }
 
 /// Merge two eth_getLogs responses
-pub(crate) fn merge_eth_get_logs_responses(
+fn merge_eth_get_logs_responses(
     legacy_response: MethodResponse,
     local_response: MethodResponse,
     request_id: Id,
