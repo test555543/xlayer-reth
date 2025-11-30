@@ -1,15 +1,16 @@
 use std::future::Future;
 
+use futures::future::Either;
 use jsonrpsee::{
     core::middleware::{Batch, Notification},
     server::middleware::rpc::RpcServiceT,
     types::Request,
     MethodResponse,
 };
+use jsonrpsee_types::ErrorObject;
 use tracing::debug;
 
 use crate::LegacyRpcRouterService;
-use jsonrpsee_types::ErrorObject;
 
 /// Only these methods should be considered for legacy routing.
 #[inline]
@@ -156,18 +157,19 @@ where
     type BatchResponse = S::BatchResponse;
 
     fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
+        let method = req.method_name();
+
+        // Early return - no boxing, direct passthrough
+        if !self.config.enabled || !is_legacy_routable(method) {
+            return Either::Left(self.inner.call(req));
+        }
+
         let client = self.client.clone();
         let config = self.config.clone();
         let inner = self.inner.clone();
 
-        Box::pin(async move {
+        Either::Right(Box::pin(async move {
             let method = req.method_name();
-
-            // If legacy not enabled, do not route.
-            // Not under legacy routing, do not route.
-            if !config.enabled || !is_legacy_routable(method) {
-                return inner.call(req).await;
-            }
 
             if method == "eth_getLogs" {
                 return crate::get_logs::handle_eth_get_logs(req, client, config, inner).await;
@@ -182,7 +184,7 @@ where
             debug!("No legacy routing for method = {}", method);
             // Default resorts to normal rpc calls.
             inner.call(req).await
-        })
+        }))
     }
 
     fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {

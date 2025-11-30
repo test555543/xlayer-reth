@@ -12770,6 +12770,7 @@ dependencies = [
 name = "xlayer-legacy-rpc"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "jsonrpsee",
  "jsonrpsee-types",
  "reqwest 0.12.24",
