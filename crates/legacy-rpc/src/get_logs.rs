@@ -178,43 +178,8 @@ fn merge_eth_get_logs_responses(
             .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
             .unwrap_or(0);
 
-        match block_a.cmp(&block_b) {
-            std::cmp::Ordering::Equal => {
-                // If same block, compare transaction index
-                let tx_idx_a = a
-                    .get("transactionIndex")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
-                    .unwrap_or(0);
-
-                let tx_idx_b = b
-                    .get("transactionIndex")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
-                    .unwrap_or(0);
-
-                match tx_idx_a.cmp(&tx_idx_b) {
-                    std::cmp::Ordering::Equal => {
-                        // If same transaction, compare log index
-                        let log_idx_a = a
-                            .get("logIndex")
-                            .and_then(|v| v.as_str())
-                            .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
-                            .unwrap_or(0);
-
-                        let log_idx_b = b
-                            .get("logIndex")
-                            .and_then(|v| v.as_str())
-                            .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
-                            .unwrap_or(0);
-
-                        log_idx_a.cmp(&log_idx_b)
-                    }
-                    other => other,
-                }
-            }
-            other => other,
-        }
+        // Separated by cutoff point, won't need to compare equal block numbers
+        block_a.cmp(&block_b)
     });
 
     // Create merged response
@@ -281,10 +246,10 @@ where
                 );
 
                 // Call both and merge results
-                let (legacy_response, local_response) = tokio::join!(
-                    async { service.forward_to_legacy(legacy_req).await },
-                    async { inner.call(local_req).await }
-                );
+                let (legacy_response, local_response) =
+                    tokio::join!(async { service.forward_to_legacy(legacy_req).await }, async {
+                        inner.call(local_req).await
+                    });
 
                 // Merge the results
                 return merge_eth_get_logs_responses(legacy_response, local_response, req.id());
@@ -369,7 +334,7 @@ mod tests {
                       "address": "0x1234567890123456789012345678901234567890",
                       "topics": ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"],
                       "data": "0x0000000000000000000000000000000000000000000000000000000000000002",
-                      "blockNumber": "0x65",
+                      "blockNumber": "0x64",
                       "transactionHash": "0xbbb",
                       "logIndex": "0x0"
                   }
@@ -385,7 +350,7 @@ mod tests {
                       "address": "0x1234567890123456789012345678901234567890",
                       "topics": ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"],
                       "data": "0x0000000000000000000000000000000000000000000000000000000000000003",
-                      "blockNumber": "0x64",
+                      "blockNumber": "0x65",
                       "transactionHash": "0xccc",
                       "logIndex": "0x0"
                   },
