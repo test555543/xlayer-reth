@@ -140,7 +140,6 @@ fn main() {
                 .with_add_ons(add_ons)
                 .on_component_initialized(move |_ctx| {
                     // TODO: Initialize XLayer components here
-                    // - Bridge intercept configuration
                     // - Inner transaction tracking
                     Ok(())
                 })
@@ -151,7 +150,6 @@ fn main() {
                 )
                 .extend_rpc_modules(move |ctx| {
                     // TODO: Add XLayer RPC extensions here
-                    // - Bridge intercept RPC methods
                     // - Inner transaction RPC methods
                     let new_op_eth_api = Arc::new(ctx.registry.eth_api().clone());
 
