@@ -202,8 +202,6 @@ pub(crate) fn parse_block_param(params: &str, index: usize) -> Option<String> {
                 // Handle blockNumber in object format
                 if let Some(stripped) = num.strip_prefix("0x") {
                     u64::from_str_radix(stripped, 16).ok().map(|n| n.to_string())
-                // if num.starts_with("0x") {
-                //     u64::from_str_radix(&num[2..], 16).ok().map(|n| n.to_string())
                 } else {
                     Some(num.clone())
                 }
