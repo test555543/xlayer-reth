@@ -97,16 +97,16 @@ impl XLayerInterceptArgs {
 #[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
 pub struct LegacyRpcArgs {
     /// Enable legacy RPC
-    #[arg(long = "legacy-rpc.enabled", default_value_t = false)]
+    #[arg(long = "rpc.legacy-enabled", default_value_t = false)]
     pub legacy_rpc_enabled: bool,
 
     /// Legacy RPC endpoint URL for routing historical data
-    #[arg(long = "legacy-rpc.url", value_name = "URL")]
+    #[arg(long = "rpc.legacy-url", value_name = "URL")]
     pub legacy_rpc_url: Option<String>,
 
     /// Timeout for legacy RPC requests
     #[arg(
-        long = "legacy-rpc.timeout",
+        long = "rpc.legacy-timeout",
         value_name = "DURATION",
         default_value = "30s",
         value_parser = humantime::parse_duration,
