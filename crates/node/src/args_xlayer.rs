@@ -31,6 +31,44 @@ impl XLayerArgs {
     pub fn validate(&self) -> Result<(), String> {
         self.intercept.validate()
     }
+
+    /// Validate init command arguments for xlayer-mainnet and xlayer-testnet
+    ///
+    /// If --chain=xlayer-mainnet or --chain=xlayer-testnet is specified in init command,
+    /// it must be provided as a genesis.json file path, not as a chain name.
+    pub fn validate_init_command() {
+        let args: Vec<String> = std::env::args().collect();
+
+        // Check if this is an init command
+        if args.len() < 2 || args[1] != "init" {
+            return;
+        }
+
+        // Find --chain argument
+        let mut chain_value: Option<String> = None;
+        for (i, arg) in args.iter().enumerate() {
+            if arg == "--chain" && i + 1 < args.len() {
+                chain_value = Some(args[i + 1].clone());
+                break;
+            } else if arg.starts_with("--chain=") {
+                chain_value = Some(arg.strip_prefix("--chain=").unwrap().to_string());
+                break;
+            }
+        }
+
+        if let Some(chain) = chain_value {
+            // Check if chain is xlayer-mainnet or xlayer-testnet
+            if chain == "xlayer-mainnet" || chain == "xlayer-testnet" {
+                eprintln!(
+                    "Error: For --chain={}, you must use a genesis.json file instead of the chain name.\n\
+                    Please specify the path to your genesis.json file, e.g.:\n\
+                    xlayer-reth-node init --chain=/path/to/genesis.json",
+                    chain
+                );
+                std::process::exit(1);
+            }
+        }
+    }
 }
 
 /// X Layer Bridge transaction interception arguments
