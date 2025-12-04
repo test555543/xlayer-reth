@@ -151,9 +151,9 @@ fn main() {
                         // Note: This only processes real-time blocks, NOT synced blocks from Pipeline
                         initialize_innertx_replay(ctx.node());
                         info!(target: "reth::cli", "xlayer inner tx replay initialized (canonical_state_stream mode)");
-                        let custom_rpc = XlayerInnerTxExt { backend: new_op_eth_api.clone() };
-                        
+
                         // Register inner tx RPC
+                        let custom_rpc = XlayerInnerTxExt { backend: new_op_eth_api.clone() };
                         ctx.modules.merge_configured(custom_rpc.into_rpc())?;
                         info!(target: "reth::cli", "xlayer innertx rpc enabled");
                     }

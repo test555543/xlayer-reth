@@ -10,9 +10,9 @@ use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::StateProviderFactory;
-use reth_tracing::tracing::{error, info};
+use reth_tracing::tracing::{debug, error, info};
 
-use crate::replay_utils::{replay_and_index_block, remove_block};
+use crate::replay_utils::{remove_block, replay_and_index_block};
 
 /// Initializes the inner transaction replay handler that listens to `canonical_state_stream`
 /// and indexes internal transactions for each new canonical block.
@@ -63,10 +63,10 @@ async fn handle_canonical_state_stream<P, E, N>(
     while let Some(notification) = stream.next().await {
         match notification {
             CanonStateNotification::Commit { new } => {
-                info!(target: "xlayer::subscriber", "Canonical commit: range {:?}", new.range());
+                debug!(target: "xlayer::subscriber", "Canonical commit: range {:?}", new.range());
 
                 for block in new.blocks_iter() {
-                    info!(target: "xlayer::subscriber", "Processing committed block: {:?}", block.hash());
+                    debug!(target: "xlayer::subscriber", "Processing committed block: {:?}", block.hash());
 
                     let provider_clone = provider.clone();
                     let evm_config_clone = evm_config.clone();
@@ -84,7 +84,7 @@ async fn handle_canonical_state_stream<P, E, N>(
                 }
             }
             CanonStateNotification::Reorg { old, new } => {
-                info!(
+                debug!(
                     target: "xlayer::subscriber",
                     "Canonical reorg: old range {:?}, new range {:?}",
                     old.range(),
@@ -93,7 +93,7 @@ async fn handle_canonical_state_stream<P, E, N>(
 
                 // Remove old blocks
                 for block in old.blocks_iter() {
-                    info!(target: "xlayer::subscriber", "Removing reorged block: {:?}", block.hash());
+                    debug!(target: "xlayer::subscriber", "Removing reorged block: {:?}", block.hash());
 
                     let evm_config_clone = evm_config.clone();
 
@@ -109,7 +109,7 @@ async fn handle_canonical_state_stream<P, E, N>(
 
                 // Add new blocks
                 for block in new.blocks_iter() {
-                    info!(target: "xlayer::subscriber", "Processing new reorg block: {:?}", block.hash());
+                    debug!(target: "xlayer::subscriber", "Processing new reorg block: {:?}", block.hash());
 
                     let provider_clone = provider.clone();
                     let evm_config_clone = evm_config.clone();
@@ -131,4 +131,3 @@ async fn handle_canonical_state_stream<P, E, N>(
 
     info!(target: "xlayer::subscriber", "Inner tx replay handler stopped - canonical state stream closed");
 }
-
