@@ -360,6 +360,44 @@ pub async fn wait_for_tx_mined(endpoint_url: &str, tx_hash: &str) -> Result<serd
     .map_err(|_| eyre!("timeout waiting for tx to be mined: {}", tx_hash))?
 }
 
+/// Waits for a block to be available on both flashblock and non-flashblock nodes
+/// This ensures synchronization before running comparison tests
+pub async fn wait_for_block_on_both_nodes(
+    fb_client: &HttpClient,
+    non_fb_client: &HttpClient,
+    block_num: u64,
+    timeout: Duration,
+) -> Result<()> {
+    println!("Waiting for block {} to be available on both nodes...", block_num);
+
+    tokio::time::timeout(timeout, async {
+        loop {
+            // Check if block is available on flashblock node
+            let fb_available =
+                eth_get_block_by_number_or_hash(fb_client, BlockId::Number(block_num), false)
+                    .await
+                    .map(|block| !block.is_null())
+                    .unwrap_or(false);
+
+            // Check if block is available on non-flashblock node
+            let non_fb_available =
+                eth_get_block_by_number_or_hash(non_fb_client, BlockId::Number(block_num), false)
+                    .await
+                    .map(|block| !block.is_null())
+                    .unwrap_or(false);
+
+            if fb_available && non_fb_available {
+                println!("Block {} is now available on both nodes", block_num);
+                return Ok(());
+            }
+
+            sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .map_err(|_| eyre!("timeout waiting for block {} to be available on both nodes", block_num))?
+}
+
 /// Send the tx request and wait for it to be mined
 pub async fn sign_and_send_transaction(
     endpoint_url: &str,
