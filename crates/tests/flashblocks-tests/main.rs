@@ -948,10 +948,11 @@ async fn fb_rpc_comparison_test(#[case] test_name: &str) {
 async fn fb_subscription_test() -> Result<()> {
     let ws_url = operations::manager::DEFAULT_FLASHBLOCKS_WS_URL;
     let test_address = operations::DEFAULT_L2_NEW_ACC1_ADDRESS;
-    let fb_client = operations::create_test_client(operations::DEFAULT_L2_NETWORK_URL_FB);
+    let non_fb_client = operations::create_test_client(operations::DEFAULT_L2_NETWORK_URL_NO_FB);
 
-    let current_block_number =
-        operations::eth_block_number(&fb_client).await.expect("Failed to get current block number");
+    let current_block_number = operations::eth_block_number(&non_fb_client)
+        .await
+        .expect("Failed to get current block number");
     println!("Current block number: {}", current_block_number);
 
     let num_txs: usize = 5;
