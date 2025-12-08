@@ -1,24 +1,31 @@
 //! Functional tests for e2e tests
 //!
 //! Run all tests with: `cargo test -p xlayer-e2e-test --test e2e_tests -- --nocapture --test-threads=1`
-//! or run a specific test with: `cargo test -p xlayer-e2e-test --test e2e_tests -- <test_case_name> -- --nocapture`
-//! --test-threads=1`
+//! or run a specific test with: `cargo test -p xlayer-e2e-test --test e2e_tests -- <test_case_name> --nocapture --test-threads=1`
 
-use alloy_primitives::U256;
+use alloy_network::TransactionBuilder;
+use alloy_primitives::{hex, Address, Bytes, B256, U256};
+use alloy_rpc_types_eth::{AccessList, AccessListItem, TransactionRequest};
+use alloy_signer_local::PrivateKeySigner;
+use alloy_sol_types::{sol, SolCall};
+use jsonrpsee::core::client::ClientT;
+use serde_json::json;
+use std::str::FromStr;
 use xlayer_e2e_test::operations;
 
 #[tokio::test]
 async fn test_send_transaction() {
-    use alloy_primitives::U256;
-
     // Transfer 1 ETH to test account 1
-    let amount = U256::from(1_000_000_000_000_000_000u128); // 1 ETH in wei
+    let amount = U256::from(operations::ETH_WEI); // 1 ETH in wei
     let to_address = operations::manager::DEFAULT_L2_NEW_ACC1_ADDRESS;
 
-    let tx_hash =
-        operations::transfer_token(operations::manager::DEFAULT_L2_NETWORK_URL, amount, to_address)
-            .await
-            .expect("Failed to transfer tokens");
+    let tx_hash = operations::native_balance_transfer(
+        operations::manager::DEFAULT_L2_NETWORK_URL,
+        amount,
+        to_address,
+    )
+    .await
+    .expect("Failed to transfer tokens");
 
     println!("Transaction hash: {}", tx_hash);
     assert!(tx_hash.starts_with("0x"));
@@ -289,14 +296,11 @@ async fn test_eth_block_rpc(#[case] test_name: &str) {
             println!("ERC20 contract at: {:#x}", contracts.erc20);
 
             let batch_size = 10;
-            let amount = U256::from(100u128) * U256::from(10u128).pow(U256::from(18u128)); // 100 tokens per transfer
+            let amount = 100u128; // 100 tokens per transfer
             let to_address = operations::manager::DEFAULT_L2_NEW_ACC1_ADDRESS;
 
             println!("Performing batch transfer of {} transactions", batch_size);
-            println!(
-                "Amount per transfer: {} tokens",
-                amount / U256::from(10u128).pow(U256::from(18u128))
-            );
+            println!("Amount per transfer: {} tokens", amount);
             println!("Recipient: {}", to_address);
 
             // Perform batch ERC20 token transfers
@@ -304,7 +308,7 @@ async fn test_eth_block_rpc(#[case] test_name: &str) {
                 operations::transfer_erc20_token_batch(
                     operations::manager::DEFAULT_L2_NETWORK_URL,
                     contracts.erc20,
-                    amount,
+                    U256::from(amount * operations::ETH_WEI),
                     to_address,
                     batch_size,
                 )
@@ -373,16 +377,13 @@ async fn test_eth_block_rpc(#[case] test_name: &str) {
 #[case::get_transaction_receipt("EthGetTransactionReceipt")]
 #[tokio::test]
 async fn test_eth_transaction_rpc(#[case] test_name: &str) {
-    use alloy_primitives::hex;
-    use alloy_sol_types::{sol, SolCall};
-
     let client = operations::create_test_client(operations::DEFAULT_L2_NETWORK_URL);
 
     // Setup: Ensure contracts are deployed
     let contracts = operations::try_deploy_contracts().await.expect("Failed to deploy contracts");
 
     // Setup: Send a transaction to test with
-    let tx_hash = operations::transfer_token(
+    let tx_hash = operations::native_balance_transfer(
         operations::manager::DEFAULT_L2_NETWORK_URL,
         U256::from(1_000_000_000u64), // 1 Gwei
         operations::manager::DEFAULT_L2_NEW_ACC1_ADDRESS,
@@ -401,7 +402,7 @@ async fn test_eth_transaction_rpc(#[case] test_name: &str) {
                     .expect("Failed to get balance");
             assert!(balance > U256::ZERO, "From address should have balance");
 
-            let transfer_amount = U256::from(1_000_000_000_000_000u128); // 0.001 ETH
+            let transfer_amount = U256::from(operations::ETH_WEI); // 1 ETH
             let gas = operations::estimate_gas(
                 &client,
                 Some(serde_json::json!({
@@ -639,15 +640,6 @@ async fn test_txpool_rpc(#[case] test_name: &str) {
 #[case::eip4844_blob_fields("Eip4844BlobFields")]
 #[tokio::test]
 async fn test_new_transaction_types(#[case] test_name: &str) {
-    use alloy_network::TransactionBuilder;
-    use alloy_primitives::{hex, Address, Bytes, B256, U256};
-    use alloy_rpc_types_eth::{AccessList, AccessListItem, TransactionRequest};
-    use alloy_signer_local::PrivateKeySigner;
-    use alloy_sol_types::{sol, SolCall};
-    use jsonrpsee::core::client::ClientT;
-    use serde_json::json;
-    use std::str::FromStr;
-
     let client = operations::create_test_client(operations::DEFAULT_L2_NETWORK_URL);
     let private_key = "363ea277eec54278af051fb574931aec751258450a286edce9e1f64401f3b9c8";
 
@@ -660,8 +652,8 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
             let to_address =
                 Address::from_str("0x1111111111111111111111111111111111111111").unwrap();
 
-            let funding_amount = U256::from(10_000_000_000_000_000_000u128); // 10 ETH
-            operations::transfer_token(
+            let funding_amount = U256::from(10 * operations::ETH_WEI); // 10 ETH
+            operations::native_balance_transfer(
                 operations::manager::DEFAULT_L2_NETWORK_URL,
                 funding_amount,
                 &format!("{:#x}", from_address),
@@ -714,8 +706,8 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
             let signer = PrivateKeySigner::from_str(private_key).expect("Invalid private key");
             let from_address = signer.address();
 
-            let funding_amount = U256::from(10_000_000_000_000_000_000u128);
-            operations::transfer_token(
+            let funding_amount = U256::from(10 * operations::ETH_WEI); // 10 ETH
+            operations::native_balance_transfer(
                 operations::manager::DEFAULT_L2_NETWORK_URL,
                 funding_amount,
                 &format!("{:#x}", from_address),
@@ -763,7 +755,7 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
 
             // Perform batch transfers to generate blocks
             let batch_size = 10;
-            let amount = U256::from(1_000_000_000u128); // 1 Gwei
+            let amount = U256::from(operations::GWEI); // 1 Gwei
             let to_address = "0x1111111111111111111111111111111111111111";
 
             operations::transfer_erc20_token_batch(
@@ -834,8 +826,8 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
             let to_address =
                 Address::from_str("0x1111111111111111111111111111111111111111").unwrap();
 
-            let funding_amount = U256::from(10_000_000_000_000_000_000u128);
-            operations::transfer_token(
+            let funding_amount = U256::from(operations::ETH_WEI); // 1 ETH
+            operations::native_balance_transfer(
                 operations::manager::DEFAULT_L2_NETWORK_URL,
                 funding_amount,
                 &format!("{:#x}", from_address),
@@ -918,8 +910,8 @@ async fn test_new_transaction_types(#[case] test_name: &str) {
             let signer = PrivateKeySigner::from_str(private_key).expect("Invalid private key");
             let from_address = signer.address();
 
-            let funding_amount = U256::from(10_000_000_000_000_000_000u128);
-            operations::transfer_token(
+            let funding_amount = U256::from(operations::ETH_WEI); // 1 ETH
+            operations::native_balance_transfer(
                 operations::manager::DEFAULT_L2_NETWORK_URL,
                 funding_amount,
                 &format!("{:#x}", from_address),

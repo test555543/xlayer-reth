@@ -14788,10 +14788,12 @@ dependencies = [
  "jsonrpsee 0.26.0",
  "revm",
  "rstest",
+ "scopeguard",
  "serde_json",
  "tempfile",
  "tokio",
  "tokio-stream",
+ "tokio-tungstenite",
  "tracing",
  "url",
 ]
