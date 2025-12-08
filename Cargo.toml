@@ -187,7 +187,7 @@ uuid = { version = "1.6.1", features = ["serde", "v5", "v4"] }
 # ==============================================================================
 # Dependency Patches
 # ==============================================================================
-# Redirects all paradigmxyz/reth dependencies to okx/reth fork.
+# Redirects all paradigmxyz/reth dependencies to okx/reth fork for op-rbuilder.
 [patch."https://github.com/paradigmxyz/reth"]
 reth = { git = "https://github.com/okx/reth", branch = "upstream/dev" }
 reth-basic-payload-builder = { git = "https://github.com/okx/reth", branch = "upstream/dev" }
