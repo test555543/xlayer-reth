@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use args_xlayer::XLayerArgs;
 use clap::Parser;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use op_rbuilder::{
     args::OpRbuilderArgs,
@@ -22,6 +22,7 @@ use reth_optimism_cli::Cli;
 use reth_optimism_node::OpNode;
 
 use xlayer_chainspec::XLayerChainSpecParser;
+use xlayer_flashblocks::handler::FlashblocksService;
 use xlayer_innertx::{
     cache_utils::initialize_inner_tx_cache,
     db_utils::initialize_inner_tx_db,
@@ -222,9 +223,22 @@ fn main() {
                             info!(target: "reth::cli", "xlayer inner tx flashblocks handler initialized");
                         }
 
+                        if let Some(flashblock_rx) = new_op_eth_api.subscribe_received_flashblocks() {
+                            let service = FlashblocksService::new(
+                                ctx.node().clone(),
+                                flashblock_rx,
+                                args.node_args.clone(),
+                            )?;
+                            service.spawn();
+                            info!(target: "reth::cli", "xlayer flashblocks service initialized");
+                        } else {
+                            warn!(target: "reth::cli", "unable to get flashblock receiver, xlayer flashblocks service not initialized");
+                        }
+
                         // Register XLayer RPC
                         let xlayer_rpc = XlayerRpcExt { backend: new_op_eth_api };
                         ctx.modules.merge_configured(xlayer_rpc.into_rpc())?;
+
                         info!(target: "reth::cli", "xlayer rpc extension enabled");
 
                         info!(message = "XLayer RPC modules initialized");
