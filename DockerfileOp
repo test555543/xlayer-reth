@@ -39,10 +39,10 @@ ARG FEATURES=""
 ENV FEATURES=$FEATURES
 
 # Git metadata for vergen (used when .git is not available)
-ARG VERGEN_GIT_SHA
+ARG VERGEN_GIT_SHA="00000000" # should be at least 8 chars long
 ENV VERGEN_GIT_SHA=$VERGEN_GIT_SHA
 
-ARG VERGEN_GIT_COMMIT_TIMESTAMP
+ARG VERGEN_GIT_COMMIT_TIMESTAMP=""
 ENV VERGEN_GIT_COMMIT_TIMESTAMP=$VERGEN_GIT_COMMIT_TIMESTAMP
 
 RUN cargo chef cook --profile $BUILD_PROFILE --features "$FEATURES" --recipe-path recipe.json --manifest-path /app/bin/node/Cargo.toml
