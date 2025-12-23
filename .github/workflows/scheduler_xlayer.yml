@@ -1,0 +1,161 @@
+name: X Layer Scheduled CI
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:      # Allow manual trigger
+
+# Ensure only one workflow runs at a time
+concurrency:
+  group: scheduler-xlayer-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  SEED: rustethereumethereumrust
+  RUST_BACKTRACE: 1
+
+jobs:
+  ##############################################################################
+  # Phase 0: Sync from Upstream
+  ##############################################################################
+
+  sync-upstream:
+    name: Sync from upstream (okx/reth)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write  # Required for pushing merged changes
+      pull-requests: none
+      issues: none
+      packages: none
+    steps:
+      - name: Checkout current branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/okx/xlayer-reth.git || true
+          git remote -v
+
+      - name: Fetch upstream
+        run: |
+          echo "Fetching from upstream okx/xlayer-reth..."
+          git fetch upstream main
+
+      - name: Merge upstream/main into current branch
+        id: merge
+        continue-on-error: true
+        run: |
+          echo "Current branch: $(git branch --show-current)"
+          echo "Attempting to merge upstream/main..."
+
+          if git merge --no-edit upstream/main; then
+            echo "✅ Merge successful"
+            echo "merge_status=success" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Merge conflict detected"
+            echo "merge_status=conflict" >> $GITHUB_OUTPUT
+            git merge --abort
+            exit 1
+          fi
+
+      - name: Push merged changes
+        if: steps.merge.outputs.merge_status == 'success'
+        run: |
+          echo "Pushing changes to origin..."
+          git push origin HEAD:${{ github.ref_name }}
+
+      - name: Generate sync summary
+        if: always()
+        run: |
+          echo "## 🔄 Upstream Sync Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Upstream:** https://github.com/okx/xlayer-reth (main branch)" >> $GITHUB_STEP_SUMMARY
+          echo "**Target Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ steps.merge.outputs.merge_status }}" == "success" ]]; then
+            echo "✅ **Successfully synced from upstream**" >> $GITHUB_STEP_SUMMARY
+
+            # Show recent commits from upstream
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Recent Upstream Changes" >> $GITHUB_STEP_SUMMARY
+            git log --oneline --graph --decorate -10 >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Merge conflict detected**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ Please resolve conflicts manually:" >> $GITHUB_STEP_SUMMARY
+            echo "1. Clone the repository" >> $GITHUB_STEP_SUMMARY
+            echo "2. Run: \`git remote add upstream https://github.com/okx/xlayer-reth.git\`" >> $GITHUB_STEP_SUMMARY
+            echo "3. Run: \`git fetch upstream\`" >> $GITHUB_STEP_SUMMARY
+            echo "4. Run: \`git merge upstream/main\`" >> $GITHUB_STEP_SUMMARY
+            echo "5. Resolve conflicts and push" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail workflow if merge conflict
+        if: steps.merge.outputs.merge_status != 'success'
+        run: |
+          echo "::error::Merge conflict detected. Please resolve manually."
+          exit 1
+
+  ##############################################################################
+  # Phase 1: Check Suite
+  ##############################################################################
+
+  basic-checks:
+    needs: [sync-upstream]
+    name: Basic Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Pull latest changes from sync
+        run: |
+          git pull origin ${{ github.ref_name }}
+
+      - uses: extractions/setup-just@v3
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Run justfile check
+        id: run_checks
+        continue-on-error: true
+        run: |
+          just check
+
+      - name: Generate test summary
+        if: always()
+        run: |
+          echo "## 🧪 Basic Checks " >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.run_checks.outcome }}" == "success" ]; then
+            echo "✅ **All checks passed**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Some checks failed**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail workflow if checks failed
+        if: steps.run_checks.outcome != 'success'
+        run: |
+          echo "::error::Checks failed. Please review the errors above."
+          exit 1
