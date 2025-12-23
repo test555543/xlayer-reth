@@ -236,7 +236,7 @@ jobs:
   notify:
     name: Send Lark Notification
     runs-on: ubuntu-latest
-    needs: [summary, sync-upstream, basic-checks]
+    needs: [sync-upstream, basic-checks, summary]
     if: always()
     timeout-minutes: 10
     permissions:
