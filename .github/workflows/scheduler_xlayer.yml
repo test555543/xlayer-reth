@@ -159,3 +159,254 @@ jobs:
         run: |
           echo "::error::Checks failed. Please review the errors above."
           exit 1
+
+  ##############################################################################
+  # Phase 2: Summary & Notification
+  ##############################################################################
+
+  summary:
+    name: Generate Summary Report
+    runs-on: ubuntu-latest
+    needs:
+      - sync-upstream
+      - basic-checks
+
+    if: always()
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Generate comprehensive summary
+        run: |
+          echo "# 📊 X Layer Scheduled CI Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## 🔍 Results Overview" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Category | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          # Upstream Sync
+          if [[ "${{ needs.sync-upstream.result }}" == "success" ]]; then
+            echo "| Upstream Sync | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Upstream Sync | ❌ Failed (Conflict) |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Basic Checks 
+          if [[ "${{ needs.basic-checks.result }}" == "success" ]]; then
+            echo "| Basic Checks | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Basic Checks | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Overall Status (test failures only, audit failures don't affect overall status)
+          if [[ "${{ needs.sync-upstream.result }}" == "success" ]] && \
+             [[ "${{ needs.basic-checks.result }}" == "success" ]]; then
+            echo "## ✅ Overall Status: SUCCESS" >> $GITHUB_STEP_SUMMARY
+            echo "all_passed" > status.txt
+          else
+            echo "## ❌ Overall Status: FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "some_failed" > status.txt
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "View detailed logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-summary
+          path: status.txt
+          retention-days: 30
+
+
+  notify:
+    name: Send Lark Notification
+    runs-on: ubuntu-latest
+    needs: [summary, sync-upstream, basic-checks]
+    if: always()
+    timeout-minutes: 10
+    permissions:
+      contents: none
+    steps:
+      - name: Determine Status and Send Notification
+        env:
+          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
+        run: |
+          # Determine overall status and color
+          if [[ "${{ needs.summary.result }}" == "success" ]]; then
+            CARD_COLOR="green"
+            STATUS_TEXT="✅ All Tasks Passed"
+            STATUS_EMOJI="✅"
+          else
+            CARD_COLOR="red"
+            STATUS_TEXT="❌ Some Tasks Failed"
+            STATUS_EMOJI="❌"
+          fi
+
+          # Get current time in Beijing timezone
+          CURRENT_TIME=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
+          COMMIT_SHORT="${GITHUB_SHA:0:8}"
+
+          # Build status for each check
+          get_status_icon() {
+            if [[ "$1" == "success" ]]; then
+              echo "✅"
+            else
+              echo "❌"
+            fi
+          }
+
+          SYNC_ICON=$(get_status_icon "${{ needs.sync-upstream.result }}")
+          UNIT_ICON=$(get_status_icon "${{ needs.basic-checks.result }}")
+
+          # Build Lark Card JSON
+          cat > lark_card.json <<EOF
+          {
+            "msg_type": "interactive",
+            "card": {
+              "header": {
+                "title": {
+                  "tag": "plain_text",
+                  "content": "${STATUS_EMOJI} X-Layer Reth (new framework) Scheduled CI Report"
+                },
+                "template": "${CARD_COLOR}"
+              },
+              "elements": [
+                {
+                  "tag": "div",
+                  "fields": [
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "**📅 Run Time**\\n${CURRENT_TIME}"
+                      }
+                    },
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "**🔀 Branch**\\n${{ github.ref_name }}"
+                      }
+                    },
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "**📝 Commit**\\n${COMMIT_SHORT}"
+                      }
+                    },
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "**🔢 Run ID**\\n${{ github.run_id }}"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "tag": "hr"
+                },
+                {
+                  "tag": "div",
+                  "text": {
+                    "tag": "lark_md",
+                    "content": "**🧪 Test Status**"
+                  }
+                },
+                {
+                  "tag": "div",
+                  "fields": [
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "${SYNC_ICON} Upstream Sync"
+                      }
+                    },
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "${UNIT_ICON} Basic Checks"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "tag": "hr"
+                },
+                {
+                  "tag": "div",
+                  "text": {
+                    "tag": "lark_md",
+                    "content": "**${STATUS_TEXT}**"
+                  }
+                },
+                {
+                  "tag": "action",
+                  "actions": [
+                    {
+                      "tag": "button",
+                      "text": {
+                        "tag": "plain_text",
+                        "content": "View Detailed Logs"
+                      },
+                      "type": "primary",
+                      "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+          EOF
+
+          # Send to Lark/Feishu
+          if [ -n "$LARK_WEBHOOK_URL" ]; then
+            echo "Sending card notification to Lark..."
+
+            # Send request and capture response (webhook URL never logged)
+            response=$(curl -s -w "\n%{http_code}" -X POST "$LARK_WEBHOOK_URL" \
+              -H 'Content-Type: application/json' \
+              -d @lark_card.json)
+
+            http_code=$(echo "$response" | tail -n1)
+            response_body=$(echo "$response" | head -n-1)
+
+            if [ "$http_code" -eq 200 ]; then
+              echo "✅ Lark notification sent successfully"
+              # Only log sanitized response (no sensitive data)
+              echo "$response_body" | jq -r '.msg // "OK"' || echo "Notification delivered"
+            else
+              echo "❌ Failed to send Lark notification"
+              echo "HTTP Status Code: $http_code"
+              # Log sanitized error only (no webhook URL exposure)
+              echo "$response_body" | jq -r '.msg // .error // "Unknown error"' || echo "Check webhook configuration"
+            fi
+          else
+            echo "⚠️ LARK_WEBHOOK_URL not configured. Skipping notification."
+            echo ""
+            echo "To enable Lark notifications:"
+            echo "1. Go to GitHub repository Settings → Secrets → Actions"
+            echo "2. Add a new secret named 'LARK_WEBHOOK_URL'"
+            echo "3. Paste your Lark webhook URL as the value"
+            echo ""
+            echo "Generated card preview:"
+            cat lark_card.json | jq '.'
+          fi
