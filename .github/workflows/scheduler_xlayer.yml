@@ -2,7 +2,7 @@ name: X Layer Scheduled CI
 
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '*/30 * * * *'
   workflow_dispatch:      # Allow manual trigger
 
 # Ensure only one workflow runs at a time
