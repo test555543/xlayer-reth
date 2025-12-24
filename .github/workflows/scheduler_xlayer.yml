@@ -171,7 +171,67 @@ jobs:
           exit 1
 
   ##############################################################################
-  # Phase 2: Summary & Notification
+  # Phase 2: Check unused dependencies 
+  ##############################################################################
+
+  udeps:
+    needs: [sync-upstream]
+    name: udeps
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2.13.2
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Pull latest changes from sync
+        run: |
+          git pull origin ${{ github.ref_name }}
+
+      - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
+      - uses: dtolnay/rust-toolchain@0c3131df9e5407c0c36352032d04af846dbe0fb7 # nightly
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        with:
+          cache-on-failure: true
+          add-rust-environment-hash-key: "false"
+          key: nightly-${{ hashFiles('Cargo.lock') }}
+      - uses: taiki-e/install-action@3575e532701a5fc614b0c842e4119af4cc5fd16d # v2.62.60
+        with:
+          tool: cargo-udeps
+
+      - name: Run cargo udeps
+        id: run_udeps
+        continue-on-error: true
+        run: |
+          cargo +nightly udeps --workspace --all-features --all-targets
+
+      - name: Generate test summary
+        if: always()
+        run: |
+          echo "## 🔍 Unused Dependencies Check" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.run_udeps.outcome }}" == "success" ]; then
+            echo "✅ **No unused dependencies found**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Unused dependencies detected**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail workflow if udeps failed
+        if: steps.run_udeps.outcome != 'success'
+        run: |
+          echo "::error::Unused dependencies found. Please review the errors above."
+          exit 1
+
+  ##############################################################################
+  # Phase 3: Summary & Notification
   ##############################################################################
 
   summary:
@@ -180,6 +240,7 @@ jobs:
     needs:
       - sync-upstream
       - basic-checks
+      - udeps
 
     if: always()
     timeout-minutes: 10
@@ -217,18 +278,26 @@ jobs:
             echo "| Upstream Sync | ❌ Failed (Conflict) |" >> $GITHUB_STEP_SUMMARY
           fi
 
-          # Basic Checks 
+          # Basic Checks
           if [[ "${{ needs.basic-checks.result }}" == "success" ]]; then
             echo "| Basic Checks | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| Basic Checks | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
           fi
 
+          # Unused Dependencies Check
+          if [[ "${{ needs.udeps.result }}" == "success" ]]; then
+            echo "| Unused Dependencies | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Unused Dependencies | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+
           echo "" >> $GITHUB_STEP_SUMMARY
 
           # Overall Status (test failures only, audit failures don't affect overall status)
           if [[ "${{ needs.sync-upstream.result }}" == "success" ]] && \
-             [[ "${{ needs.basic-checks.result }}" == "success" ]]; then
+             [[ "${{ needs.basic-checks.result }}" == "success" ]] && \
+             [[ "${{ needs.udeps.result }}" == "success" ]]; then
             echo "## ✅ Overall Status: SUCCESS" >> $GITHUB_STEP_SUMMARY
             echo "all_passed" > status.txt
           else
@@ -251,7 +320,7 @@ jobs:
   notify:
     name: Send Lark Notification
     runs-on: ubuntu-latest
-    needs: [sync-upstream, basic-checks, summary]
+    needs: [sync-upstream, basic-checks, udeps, summary]
     if: always()
     timeout-minutes: 10
     permissions:
@@ -292,6 +361,7 @@ jobs:
 
           SYNC_ICON=$(get_status_icon "${{ needs.sync-upstream.result }}")
           UNIT_ICON=$(get_status_icon "${{ needs.basic-checks.result }}")
+          UDEPS_ICON=$(get_status_icon "${{ needs.udeps.result }}")
 
           # Build Lark Card JSON
           cat > lark_card.json <<EOF
@@ -364,6 +434,13 @@ jobs:
                       "text": {
                         "tag": "lark_md",
                         "content": "${UNIT_ICON} Basic Checks"
+                      }
+                    },
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "${UDEPS_ICON} Unused Dependencies"
                       }
                     }
                   ]
