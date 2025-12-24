@@ -366,8 +366,10 @@ jobs:
         env:
           LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
         run: |
-          # Determine overall status and color
-          if [[ "${{ needs.summary.result }}" == "success" ]]; then
+          # Determine overall status and color based on actual test results
+          if [[ "${{ needs.sync-upstream.result }}" == "success" ]] && \
+             [[ "${{ needs.basic-checks.result }}" == "success" ]] && \
+             [[ "${{ needs.udeps.result }}" == "success" ]]; then
             CARD_COLOR="green"
             STATUS_TEXT="✅ All Tasks Passed"
             STATUS_EMOJI="✅"
