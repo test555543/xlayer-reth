@@ -1,3 +1,28 @@
+alias c := check
+alias f := fix
+alias t := test
+alias ff := fix-format
+alias cf := check-format
+alias cc := check-clippy
+alias fc := fix-clippy
+alias b := build
+alias bd := build-dev
+alias bm := build-maxperf
+alias bt := build-tools
+alias btm := build-tools-maxperf
+alias i := install
+alias im := install-maxperf
+alias it := install-tools
+alias itm := install-tools-maxperf
+alias cl := clean
+alias docker := build-docker
+alias dockerdev := build-docker-dev
+alias cdt := check-dev-template
+alias sdt := sync-dev-template
+alias wt := watch-test
+alias wc := watch-check
+alias xl := xlayer
+
 default:
     @just --list
 
@@ -349,11 +374,13 @@ build-docker-dev reth_path="":
     echo "✅ Restored local development config"
 
 watch-test:
-    cargo watch -x test
+    @command -v bacon >/dev/null 2>&1 || cargo install bacon
+    bacon test
 
 watch-check:
-    cargo watch -x "fmt --all -- --check" -x "clippy --all-targets -- -D warnings" -x test
+    @command -v bacon >/dev/null 2>&1 || cargo install bacon
+    bacon clippy
 
 xlayer:
-	cp .github/scripts/pre-commit-xlayer .git/hooks/pre-commit && \
-	chmod +x .git/hooks/pre-commit
+    cp .github/scripts/pre-commit-xlayer .git/hooks/pre-commit && \
+    chmod +x .git/hooks/pre-commit
