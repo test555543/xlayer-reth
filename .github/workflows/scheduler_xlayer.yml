@@ -212,16 +212,36 @@ jobs:
         id: run_udeps
         continue-on-error: true
         run: |
-          cargo +nightly udeps --workspace --all-features --all-targets
+          set +e
+          cargo +nightly udeps --workspace --all-features --all-targets 2>&1 | tee udeps_output.txt
+          exit_code=${PIPESTATUS[0]}
+          exit $exit_code
 
       - name: Generate test summary
         if: always()
         run: |
           echo "## 🔍 Unused Dependencies Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
           if [ "${{ steps.run_udeps.outcome }}" == "success" ]; then
             echo "✅ **No unused dependencies found**" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ **Unused dependencies detected**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            if [ -f udeps_output.txt ]; then
+              # Extract only the unused dependencies section (skip build/loading info)
+              # Start from "unused dependencies:" line and continue to the end
+              if grep -q "unused dependencies:" udeps_output.txt; then
+                echo '```' >> $GITHUB_STEP_SUMMARY
+                # Use awk to extract from "unused dependencies:" to end, skipping empty leading lines
+                awk '/unused dependencies:/{found=1} found' udeps_output.txt | \
+                  grep -v "Checking\|Loading depinfo\|Finished\|info:" >> $GITHUB_STEP_SUMMARY
+                echo '```' >> $GITHUB_STEP_SUMMARY
+              else
+                echo "⚠️ Could not parse unused dependencies output" >> $GITHUB_STEP_SUMMARY
+              fi
+            fi
           fi
 
       - name: Fail workflow if udeps failed
