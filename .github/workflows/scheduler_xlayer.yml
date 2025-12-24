@@ -30,6 +30,11 @@ jobs:
       issues: none
       packages: none
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - name: Checkout current branch
         uses: actions/checkout@v4
         with:
@@ -122,6 +127,11 @@ jobs:
     strategy:
       fail-fast: true
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -176,6 +186,11 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -242,6 +257,11 @@ jobs:
     permissions:
       contents: none
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - name: Determine Status and Send Notification
         env:
           LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
