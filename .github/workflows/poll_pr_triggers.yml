@@ -43,10 +43,11 @@ jobs:
         run: |
           mkdir -p .github/poll-state
 
-      - name: Get last checked timestamp
+      - name: Get last checked timestamp and processed comments
         id: last_check
         run: |
           STATE_FILE=".github/poll-state/last-pr-comment-check.txt"
+          PROCESSED_COMMENTS_FILE=".github/poll-state/processed-comment-ids.txt"
 
           if [ -f "$STATE_FILE" ]; then
             LAST_CHECKED=$(cat "$STATE_FILE")
@@ -57,18 +58,33 @@ jobs:
             echo "First run - checking since: $LAST_CHECKED"
           fi
 
+          # Create processed comments file if it doesn't exist
+          if [ ! -f "$PROCESSED_COMMENTS_FILE" ]; then
+            touch "$PROCESSED_COMMENTS_FILE"
+          fi
+
           echo "last_checked=$LAST_CHECKED" >> $GITHUB_OUTPUT
           echo "state_file=$STATE_FILE" >> $GITHUB_OUTPUT
+          echo "processed_file=$PROCESSED_COMMENTS_FILE" >> $GITHUB_OUTPUT
 
       - name: Check for /trigger commands in PR comments
         id: check_triggers
         env:
           GH_TOKEN: ${{ github.token }}
           LAST_CHECKED: ${{ steps.last_check.outputs.last_checked }}
+          PROCESSED_FILE: ${{ steps.last_check.outputs.processed_file }}
         run: |
           echo "Checking for '$TRIGGER_COMMAND' in open PRs on $UPSTREAM_REPO"
           echo "Looking for comments since: $LAST_CHECKED"
           echo ""
+
+          # Load processed comment IDs
+          if [ -f "$PROCESSED_FILE" ]; then
+            PROCESSED_IDS=$(cat "$PROCESSED_FILE")
+            echo "Previously processed comment IDs loaded"
+          else
+            PROCESSED_IDS=""
+          fi
 
           # Get all open PRs (excluding drafts)
           echo "Fetching open PRs..."
@@ -86,6 +102,7 @@ jobs:
 
           TRIGGERS_FOUND=0
           TRIGGERED_PRS=""
+          NEW_PROCESSED_IDS=""
 
           # Store PR branch info for triggering
           declare -A PR_BRANCHES
@@ -103,11 +120,18 @@ jobs:
             if [ -n "$COMMENTS" ]; then
               # Check if any comment contains /trigger
               while IFS= read -r comment; do
+                COMMENT_ID=$(echo "$comment" | jq -r '.id')
+
+                # Skip if we've already processed this comment
+                if echo "$PROCESSED_IDS" | grep -q "^${COMMENT_ID}$"; then
+                  echo "   ⏭️  Skipping comment $COMMENT_ID (already processed)"
+                  continue
+                fi
+
                 BODY=$(echo "$comment" | jq -r '.body // empty')
 
                 # Check if comment contains /trigger (case-insensitive, allow it anywhere in comment)
                 if echo "$BODY" | grep -iq "^${TRIGGER_COMMAND}\s*$\|^${TRIGGER_COMMAND}\s\|${TRIGGER_COMMAND}$"; then
-                  COMMENT_ID=$(echo "$comment" | jq -r '.id')
                   COMMENT_USER=$(echo "$comment" | jq -r '.user')
                   COMMENT_DATE=$(echo "$comment" | jq -r '.created_at')
 
@@ -133,6 +157,9 @@ jobs:
                     PR_REPOS[$pr_number]="$PR_REPO_OWNER/$PR_REPO_NAME"
                   fi
 
+                  # Mark this comment as processed
+                  NEW_PROCESSED_IDS="${NEW_PROCESSED_IDS}${COMMENT_ID}"$'\n'
+
                   # Only trigger once even if multiple /trigger comments found
                   break
                 fi
@@ -153,25 +180,43 @@ jobs:
           if [ $TRIGGERS_FOUND -gt 0 ]; then
             echo "trigger_found=true" >> $GITHUB_OUTPUT
             echo "triggered_prs=$TRIGGERED_PRS" >> $GITHUB_OUTPUT
+
+            # Store newly processed comment IDs
+            echo "new_processed_ids<<EOF" >> $GITHUB_OUTPUT
+            echo -n "$NEW_PROCESSED_IDS" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
           else
             echo "trigger_found=false" >> $GITHUB_OUTPUT
             echo "No new /trigger commands found"
           fi
 
-      - name: Update last checked timestamp
+      - name: Update state files
+        if: always()
         run: |
           # Store current timestamp for next check
           CURRENT_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           echo "$CURRENT_TIME" > "${{ steps.last_check.outputs.state_file }}"
 
-          # Commit the state file if it changed
-          if git diff --quiet "${{ steps.last_check.outputs.state_file }}"; then
-            echo "No changes to state file"
+          # Append newly processed comment IDs to the processed file
+          if [[ -n "${{ steps.check_triggers.outputs.new_processed_ids }}" ]]; then
+            echo "${{ steps.check_triggers.outputs.new_processed_ids }}" >> "${{ steps.last_check.outputs.processed_file }}"
+            echo "Added new processed comment IDs to state file"
+          fi
+
+          # Keep only last 1000 comment IDs to prevent file from growing too large
+          if [ -f "${{ steps.last_check.outputs.processed_file }}" ]; then
+            tail -n 1000 "${{ steps.last_check.outputs.processed_file }}" > "${{ steps.last_check.outputs.processed_file }}.tmp"
+            mv "${{ steps.last_check.outputs.processed_file }}.tmp" "${{ steps.last_check.outputs.processed_file }}"
+          fi
+
+          # Commit the state files if they changed
+          if git diff --quiet .github/poll-state/; then
+            echo "No changes to state files"
           else
-            git add "${{ steps.last_check.outputs.state_file }}"
-            git commit -m "Update PR comment check timestamp [skip ci]"
+            git add .github/poll-state/
+            git commit -m "Update PR polling state [skip ci]"
             git push origin HEAD:${{ github.ref_name }}
-            echo "Updated state file with timestamp: $CURRENT_TIME"
+            echo "Updated state files"
           fi
 
       - name: Trigger CI workflow
