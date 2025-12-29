@@ -168,10 +168,16 @@ jobs:
               echo "✅ **Successfully synced from upstream**" >> $GITHUB_STEP_SUMMARY
             fi
 
-            # Show recent commits
+            # Show recent commits from the appropriate source
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### Recent Changes" >> $GITHUB_STEP_SUMMARY
-            git log --oneline --graph --decorate -10 >> $GITHUB_STEP_SUMMARY
+            if [[ "${{ steps.merge.outputs.source }}" == "pr-branch" ]]; then
+              # Show commits from PR branch
+              git log pr-source/${{ inputs.pr_branch }} --oneline --graph --decorate -10 >> $GITHUB_STEP_SUMMARY
+            else
+              # Show commits from upstream/main
+              git log upstream/main --oneline --graph --decorate -10 >> $GITHUB_STEP_SUMMARY
+            fi
           else
             echo "❌ **Sync failed**" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
