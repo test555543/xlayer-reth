@@ -145,18 +145,22 @@ jobs:
                     continue
                   fi
 
-                  # Check for completed workflows with the same commit SHA
-                  COMPLETED_WORKFLOWS=$(gh run list \
+                  # Check for recently completed workflows for this PR (within last hour)
+                  ONE_HOUR_AGO=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1H +%Y-%m-%dT%H:%M:%SZ)
+
+                  RECENT_COMPLETED=$(gh run list \
                     --repo "${{ github.repository }}" \
                     --workflow scheduler_xlayer.yml \
                     --status completed \
-                    --json databaseId,headSha,displayTitle,conclusion \
-                    --limit 50 | jq --arg sha "$PR_HEAD_SHA" --arg pr "#$pr_number" '[.[] | select(.displayTitle | contains($pr)) | select(.headSha == $sha)]')
+                    --json databaseId,displayTitle,createdAt,conclusion \
+                    --limit 50 | jq --arg pr "#$pr_number" --arg since "$ONE_HOUR_AGO" '[.[] | select(.displayTitle | contains($pr)) | select(.createdAt > $since)]')
 
-                  COMPLETED_COUNT=$(echo "$COMPLETED_WORKFLOWS" | jq 'length')
+                  COMPLETED_COUNT=$(echo "$RECENT_COMPLETED" | jq 'length')
 
                   if [ "$COMPLETED_COUNT" -gt 0 ]; then
-                    echo "   ⏭️  Skipping: Already ran workflow for commit $PR_HEAD_SHA"
+                    LAST_CONCLUSION=$(echo "$RECENT_COMPLETED" | jq -r '.[0].conclusion')
+                    echo "   ⏭️  Skipping: Workflow for PR #$pr_number completed recently (last result: $LAST_CONCLUSION)"
+                    echo "   💡 Tip: Push new commits to the PR branch to trigger a new run"
                     continue
                   fi
 
@@ -220,11 +224,33 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo "🚀 Triggering scheduler_xlayer.yml workflow..."
+          echo "🚀 Preparing to trigger scheduler_xlayer.yml workflow..."
           echo "Triggered by PR(s): ${{ steps.check_triggers.outputs.triggered_prs }}"
           echo "PR Branch: ${{ steps.check_triggers.outputs.pr_branch }}"
           echo "PR Repo: ${{ steps.check_triggers.outputs.pr_repo }}"
+          echo "PR SHA: ${{ steps.check_triggers.outputs.pr_sha }}"
 
+          # Final check before triggering to prevent race conditions
+          echo ""
+          echo "🔍 Final check for race conditions..."
+          sleep 2  # Small delay to let any concurrent polls catch up
+
+          PR_NUM=$(echo "${{ steps.check_triggers.outputs.triggered_prs }}" | sed 's/#//')
+
+          # Re-check for running workflows
+          RUNNING_NOW=$(gh run list \
+            --repo "${{ github.repository }}" \
+            --workflow scheduler_xlayer.yml \
+            --status in_progress,queued,waiting \
+            --json databaseId,displayTitle \
+            --limit 20 | jq --arg pr "#$PR_NUM" '[.[] | select(.displayTitle | contains($pr))] | length')
+
+          if [ "$RUNNING_NOW" -gt 0 ]; then
+            echo "⏭️  Aborting: Detected $RUNNING_NOW running/queued workflow(s) for this PR during final check"
+            exit 0
+          fi
+
+          echo "✓ Final check passed - triggering now"
           gh workflow run scheduler_xlayer.yml \
             --ref ${{ github.ref_name }} \
             --field triggered_by="pr-comment" \
@@ -232,6 +258,8 @@ jobs:
             --field pr_numbers="${{ steps.check_triggers.outputs.triggered_prs }}" \
             --field pr_branch="${{ steps.check_triggers.outputs.pr_branch }}" \
             --field pr_repo="${{ steps.check_triggers.outputs.pr_repo }}"
+
+          echo "✅ Trigger request sent successfully"
 
       - name: Summary
         if: always()
