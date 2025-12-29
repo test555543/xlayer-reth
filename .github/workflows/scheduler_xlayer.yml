@@ -1,5 +1,7 @@
 name: X Layer Scheduled CI
 
+run-name: ${{ github.event.inputs.pr_sha != '' && format('PR CI - {0}', github.event.inputs.pr_sha) || 'Scheduled CI' }}
+
 on:
   schedule:
     - cron: '0 7 * * *'
