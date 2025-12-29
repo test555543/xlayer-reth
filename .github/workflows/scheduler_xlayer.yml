@@ -25,13 +25,17 @@ on:
         description: 'PR repository (owner/name, if triggered by PR comment)'
         required: false
         default: ''
+      pr_sha:
+        description: 'PR commit SHA (if triggered by PR comment)'
+        required: false
+        default: ''
 
 # Ensure only one workflow runs at a time
-# For PR triggers, use PR number + commit SHA to prevent duplicates
+# For PR triggers, use PR commit SHA to prevent re-running same commit
 # For scheduled/auto triggers, use branch name
 concurrency:
-  group: ${{ github.event.inputs.pr_numbers != '' && format('pr-{0}-{1}', github.event.inputs.pr_numbers, github.event.inputs.pr_branch) || format('scheduler-xlayer-{0}', github.ref) }}
-  cancel-in-progress: false  # Don't cancel, let it queue or skip
+  group: ${{ github.event.inputs.pr_sha != '' && format('pr-ci-{0}', github.event.inputs.pr_sha) || format('scheduler-xlayer-{0}', github.ref) }}
+  cancel-in-progress: false  # Don't cancel, let it queue or skip (GitHub will handle duplicates)
 
 env:
   CARGO_TERM_COLOR: always
