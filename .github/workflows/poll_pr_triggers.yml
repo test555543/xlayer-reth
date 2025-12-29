@@ -2,12 +2,12 @@ name: Poll PR Trigger Commands
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/2 * * * *'
   workflow_dispatch:  # Allow manual trigger
 
 concurrency:
   group: poll-pr-triggers-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   UPSTREAM_REPO: okx/xlayer-reth  # Change this to the repo you want to monitor
