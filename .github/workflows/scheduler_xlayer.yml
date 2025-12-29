@@ -456,7 +456,14 @@ jobs:
 
           # Get current time in Beijing timezone
           CURRENT_TIME=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
-          COMMIT_SHORT="${GITHUB_SHA:0:8}"
+
+          # Determine commit to display (PR commit if triggered by PR, otherwise CI repo commit)
+          if [[ -n "${{ github.event.inputs.pr_sha }}" ]]; then
+            COMMIT_SHORT="${{ github.event.inputs.pr_sha }}"
+            COMMIT_SHORT="${COMMIT_SHORT:0:8}"
+          else
+            COMMIT_SHORT="${GITHUB_SHA:0:8}"
+          fi
 
           # Determine if triggered by PR and set branch info accordingly
           if [[ "${{ github.event.inputs.triggered_by }}" == "pr-comment" ]]; then
