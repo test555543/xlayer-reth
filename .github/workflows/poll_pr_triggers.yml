@@ -127,44 +127,37 @@ jobs:
                   echo "   PR Repo: $PR_REPO_OWNER/$PR_REPO_NAME"
                   echo "   PR Head SHA: $PR_HEAD_SHA"
 
-                  # Check if there's already a workflow run for this PR
-                  echo "   Checking for existing workflow runs..."
+                  # Check for recent workflow runs (cooldown to prevent spam)
+                  echo "   Checking for recent workflow runs..."
 
-                  # Check for running workflows triggered by this PR
-                  RUNNING_WORKFLOWS=$(gh run list \
+                  COOLDOWN_MINUTES=15
+                  COOLDOWN_TIME=$(date -u -d "$COOLDOWN_MINUTES minutes ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-${COOLDOWN_MINUTES}M +%Y-%m-%dT%H:%M:%SZ)
+
+                  # Check for any recent workflow_dispatch runs (can't identify by PR in displayTitle)
+                  RECENT_RUNS=$(gh run list \
                     --repo "${{ github.repository }}" \
                     --workflow scheduler_xlayer.yml \
-                    --status in_progress \
-                    --json databaseId,headSha,displayTitle \
-                    --limit 50 | jq --arg pr "#$pr_number" '[.[] | select(.displayTitle | contains($pr))]')
+                    --limit 30 \
+                    --json status,conclusion,createdAt,event \
+                    | jq --arg since "$COOLDOWN_TIME" '[.[] | select(.event == "workflow_dispatch") | select(.createdAt > $since)]')
 
-                  RUNNING_COUNT=$(echo "$RUNNING_WORKFLOWS" | jq 'length')
+                  RECENT_COUNT=$(echo "$RECENT_RUNS" | jq 'length')
 
-                  if [ "$RUNNING_COUNT" -gt 0 ]; then
-                    echo "   ⏭️  Skipping: Found $RUNNING_COUNT running workflow(s) for PR #$pr_number"
+                  if [ "$RECENT_COUNT" -gt 0 ]; then
+                    LAST_STATUS=$(echo "$RECENT_RUNS" | jq -r '.[0].status')
+                    LAST_CONCLUSION=$(echo "$RECENT_RUNS" | jq -r '.[0].conclusion // "running"')
+                    LAST_TIME=$(echo "$RECENT_RUNS" | jq -r '.[0].createdAt')
+
+                    if [ "$LAST_STATUS" = "completed" ]; then
+                      echo "   ⏭️  Skipping: Workflow completed recently at $LAST_TIME (result: $LAST_CONCLUSION)"
+                    else
+                      echo "   ⏭️  Skipping: Workflow is currently $LAST_STATUS (started: $LAST_TIME)"
+                    fi
+                    echo "   💡 Cooldown: Wait $COOLDOWN_MINUTES minutes between triggers"
                     continue
                   fi
 
-                  # Check for recently completed workflows for this PR (within last hour)
-                  ONE_HOUR_AGO=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1H +%Y-%m-%dT%H:%M:%SZ)
-
-                  RECENT_COMPLETED=$(gh run list \
-                    --repo "${{ github.repository }}" \
-                    --workflow scheduler_xlayer.yml \
-                    --status completed \
-                    --json databaseId,displayTitle,createdAt,conclusion \
-                    --limit 50 | jq --arg pr "#$pr_number" --arg since "$ONE_HOUR_AGO" '[.[] | select(.displayTitle | contains($pr)) | select(.createdAt > $since)]')
-
-                  COMPLETED_COUNT=$(echo "$RECENT_COMPLETED" | jq 'length')
-
-                  if [ "$COMPLETED_COUNT" -gt 0 ]; then
-                    LAST_CONCLUSION=$(echo "$RECENT_COMPLETED" | jq -r '.[0].conclusion')
-                    echo "   ⏭️  Skipping: Workflow for PR #$pr_number completed recently (last result: $LAST_CONCLUSION)"
-                    echo "   💡 Tip: Push new commits to the PR branch to trigger a new run"
-                    continue
-                  fi
-
-                  echo "   ✓ No existing workflows found - will trigger CI"
+                  echo "   ✓ No recent runs - will trigger CI"
 
                   TRIGGERS_FOUND=$((TRIGGERS_FOUND + 1))
                   TRIGGERED_PRS="$TRIGGERED_PRS#$pr_number"
@@ -230,44 +223,9 @@ jobs:
           echo "PR Repo: ${{ steps.check_triggers.outputs.pr_repo }}"
           echo "PR SHA: ${{ steps.check_triggers.outputs.pr_sha }}"
 
-          # Final check before triggering to prevent race conditions
           echo ""
-          echo "🔍 Final check for race conditions..."
-          sleep 2  # Small delay to let any concurrent polls catch up
-
-          PR_NUM=$(echo "${{ steps.check_triggers.outputs.triggered_prs }}" | sed 's/#//')
-
-          # Re-check for running/queued workflows (check each status separately)
-          RUNNING_COUNT=$(gh run list \
-            --repo "${{ github.repository }}" \
-            --workflow scheduler_xlayer.yml \
-            --status in_progress \
-            --json databaseId,displayTitle \
-            --limit 20 | jq --arg pr "#$PR_NUM" '[.[] | select(.displayTitle | contains($pr))] | length')
-
-          QUEUED_COUNT=$(gh run list \
-            --repo "${{ github.repository }}" \
-            --workflow scheduler_xlayer.yml \
-            --status queued \
-            --json databaseId,displayTitle \
-            --limit 20 | jq --arg pr "#$PR_NUM" '[.[] | select(.displayTitle | contains($pr))] | length')
-
-          WAITING_COUNT=$(gh run list \
-            --repo "${{ github.repository }}" \
-            --workflow scheduler_xlayer.yml \
-            --status waiting \
-            --json databaseId,displayTitle \
-            --limit 20 | jq --arg pr "#$PR_NUM" '[.[] | select(.displayTitle | contains($pr))] | length')
-
-          TOTAL_ACTIVE=$((${RUNNING_COUNT:-0} + ${QUEUED_COUNT:-0} + ${WAITING_COUNT:-0}))
-
-          if [ "$TOTAL_ACTIVE" -gt 0 ]; then
-            echo "⏭️  Aborting: Detected $TOTAL_ACTIVE active workflow(s) for this PR during final check"
-            echo "   In progress: ${RUNNING_COUNT:-0}, Queued: ${QUEUED_COUNT:-0}, Waiting: ${WAITING_COUNT:-0}"
-            exit 0
-          fi
-
-          echo "✓ Final check passed - triggering now"
+          echo "🚀 Triggering CI workflow..."
+          echo "Note: Concurrency group will prevent any duplicate runs"
           gh workflow run scheduler_xlayer.yml \
             --ref ${{ github.ref_name }} \
             --field triggered_by="pr-comment" \
