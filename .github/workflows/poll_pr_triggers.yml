@@ -2,7 +2,7 @@ name: Poll PR Trigger Commands
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/30 * * * *'
   workflow_dispatch:  # Allow manual trigger
 
 concurrency:
