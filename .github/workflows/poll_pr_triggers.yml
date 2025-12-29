@@ -2,7 +2,7 @@ name: Poll PR Trigger Commands
 
 on:
   #schedule:
-  #  - cron: '*/30 * * * *'
+    # - cron: '*/5 * * * *'
   workflow_dispatch:  # Allow manual trigger
 
 concurrency:
@@ -42,11 +42,10 @@ jobs:
         run: |
           mkdir -p .github/poll-state
 
-      - name: Get last checked timestamp and processed comments
+      - name: Get last checked timestamp
         id: last_check
         run: |
           STATE_FILE=".github/poll-state/last-pr-comment-check.txt"
-          PROCESSED_COMMENTS_FILE=".github/poll-state/processed-comment-ids.txt"
 
           if [ -f "$STATE_FILE" ]; then
             LAST_CHECKED=$(cat "$STATE_FILE")
@@ -57,33 +56,18 @@ jobs:
             echo "First run - checking since: $LAST_CHECKED"
           fi
 
-          # Create processed comments file if it doesn't exist
-          if [ ! -f "$PROCESSED_COMMENTS_FILE" ]; then
-            touch "$PROCESSED_COMMENTS_FILE"
-          fi
-
           echo "last_checked=$LAST_CHECKED" >> $GITHUB_OUTPUT
           echo "state_file=$STATE_FILE" >> $GITHUB_OUTPUT
-          echo "processed_file=$PROCESSED_COMMENTS_FILE" >> $GITHUB_OUTPUT
 
       - name: Check for /trigger commands in PR comments
         id: check_triggers
         env:
           GH_TOKEN: ${{ github.token }}
           LAST_CHECKED: ${{ steps.last_check.outputs.last_checked }}
-          PROCESSED_FILE: ${{ steps.last_check.outputs.processed_file }}
         run: |
           echo "Checking for '$TRIGGER_COMMAND' in open PRs on $UPSTREAM_REPO"
           echo "Looking for comments since: $LAST_CHECKED"
           echo ""
-
-          # Load processed comment IDs
-          if [ -f "$PROCESSED_FILE" ]; then
-            PROCESSED_IDS=$(cat "$PROCESSED_FILE")
-            echo "Previously processed comment IDs loaded"
-          else
-            PROCESSED_IDS=""
-          fi
 
           # Get all open PRs (excluding drafts)
           echo "Fetching open PRs..."
@@ -101,11 +85,11 @@ jobs:
 
           TRIGGERS_FOUND=0
           TRIGGERED_PRS=""
-          NEW_PROCESSED_IDS=""
 
           # Store PR branch info for triggering
           declare -A PR_BRANCHES
           declare -A PR_REPOS
+          declare -A PR_SHAS
 
           # Check each PR for /trigger comments
           for pr_number in $(echo "$NON_DRAFT_PRS" | jq -r '.[].number'); do
@@ -119,45 +103,74 @@ jobs:
             if [ -n "$COMMENTS" ]; then
               # Check if any comment contains /trigger
               while IFS= read -r comment; do
-                COMMENT_ID=$(echo "$comment" | jq -r '.id')
-
-                # Skip if we've already processed this comment
-                if echo "$PROCESSED_IDS" | grep -q "^${COMMENT_ID}$"; then
-                  echo "   ⏭️  Skipping comment $COMMENT_ID (already processed)"
-                  continue
-                fi
-
                 BODY=$(echo "$comment" | jq -r '.body // empty')
 
                 # Check if comment contains /trigger (case-insensitive, allow it anywhere in comment)
                 if echo "$BODY" | grep -iq "^${TRIGGER_COMMAND}\s*$\|^${TRIGGER_COMMAND}\s\|${TRIGGER_COMMAND}$"; then
+                  COMMENT_ID=$(echo "$comment" | jq -r '.id')
                   COMMENT_USER=$(echo "$comment" | jq -r '.user')
                   COMMENT_DATE=$(echo "$comment" | jq -r '.created_at')
-
-                  # Get PR details including head branch
-                  PR_INFO=$(gh pr view "$pr_number" --repo "$UPSTREAM_REPO" --json headRefName,headRepository,headRepositoryOwner)
-                  PR_BRANCH=$(echo "$PR_INFO" | jq -r '.headRefName')
-                  PR_REPO_OWNER=$(echo "$PR_INFO" | jq -r '.headRepositoryOwner.login')
-                  PR_REPO_NAME=$(echo "$PR_INFO" | jq -r '.headRepository.name')
 
                   echo "✅ Found $TRIGGER_COMMAND in PR #$pr_number"
                   echo "   Comment ID: $COMMENT_ID"
                   echo "   User: $COMMENT_USER"
                   echo "   Date: $COMMENT_DATE"
+
+                  # Get PR details including head branch and SHA
+                  PR_INFO=$(gh pr view "$pr_number" --repo "$UPSTREAM_REPO" --json headRefName,headRepository,headRepositoryOwner,headRefOid)
+                  PR_BRANCH=$(echo "$PR_INFO" | jq -r '.headRefName')
+                  PR_REPO_OWNER=$(echo "$PR_INFO" | jq -r '.headRepositoryOwner.login')
+                  PR_REPO_NAME=$(echo "$PR_INFO" | jq -r '.headRepository.name')
+                  PR_HEAD_SHA=$(echo "$PR_INFO" | jq -r '.headRefOid')
+
                   echo "   PR Branch: $PR_BRANCH"
                   echo "   PR Repo: $PR_REPO_OWNER/$PR_REPO_NAME"
+                  echo "   PR Head SHA: $PR_HEAD_SHA"
+
+                  # Check if there's already a workflow run for this PR
+                  echo "   Checking for existing workflow runs..."
+
+                  # Check for running workflows triggered by this PR
+                  RUNNING_WORKFLOWS=$(gh run list \
+                    --repo "${{ github.repository }}" \
+                    --workflow scheduler_xlayer.yml \
+                    --status in_progress \
+                    --json databaseId,headSha,displayTitle \
+                    --limit 50 | jq --arg pr "#$pr_number" '[.[] | select(.displayTitle | contains($pr))]')
+
+                  RUNNING_COUNT=$(echo "$RUNNING_WORKFLOWS" | jq 'length')
+
+                  if [ "$RUNNING_COUNT" -gt 0 ]; then
+                    echo "   ⏭️  Skipping: Found $RUNNING_COUNT running workflow(s) for PR #$pr_number"
+                    continue
+                  fi
+
+                  # Check for completed workflows with the same commit SHA
+                  COMPLETED_WORKFLOWS=$(gh run list \
+                    --repo "${{ github.repository }}" \
+                    --workflow scheduler_xlayer.yml \
+                    --status completed \
+                    --json databaseId,headSha,displayTitle,conclusion \
+                    --limit 50 | jq --arg sha "$PR_HEAD_SHA" --arg pr "#$pr_number" '[.[] | select(.displayTitle | contains($pr)) | select(.headSha == $sha)]')
+
+                  COMPLETED_COUNT=$(echo "$COMPLETED_WORKFLOWS" | jq 'length')
+
+                  if [ "$COMPLETED_COUNT" -gt 0 ]; then
+                    echo "   ⏭️  Skipping: Already ran workflow for commit $PR_HEAD_SHA"
+                    continue
+                  fi
+
+                  echo "   ✓ No existing workflows found - will trigger CI"
 
                   TRIGGERS_FOUND=$((TRIGGERS_FOUND + 1))
                   TRIGGERED_PRS="$TRIGGERED_PRS#$pr_number"
 
-                  # Store branch and repo info (use first triggered PR if multiple)
+                  # Store branch, repo, and SHA info (use first triggered PR if multiple)
                   if [ -z "${PR_BRANCHES[$pr_number]}" ]; then
                     PR_BRANCHES[$pr_number]="$PR_BRANCH"
                     PR_REPOS[$pr_number]="$PR_REPO_OWNER/$PR_REPO_NAME"
+                    PR_SHAS[$pr_number]="$PR_HEAD_SHA"
                   fi
-
-                  # Mark this comment as processed
-                  NEW_PROCESSED_IDS="${NEW_PROCESSED_IDS}${COMMENT_ID}"$'\n'
 
                   # Only trigger once even if multiple /trigger comments found
                   break
@@ -171,6 +184,7 @@ jobs:
             FIRST_PR=$(echo "$TRIGGERED_PRS" | cut -d'#' -f2 | cut -d' ' -f1)
             echo "pr_branch=${PR_BRANCHES[$FIRST_PR]}" >> $GITHUB_OUTPUT
             echo "pr_repo=${PR_REPOS[$FIRST_PR]}" >> $GITHUB_OUTPUT
+            echo "pr_sha=${PR_SHAS[$FIRST_PR]}" >> $GITHUB_OUTPUT
           fi
 
           echo ""
@@ -179,43 +193,26 @@ jobs:
           if [ $TRIGGERS_FOUND -gt 0 ]; then
             echo "trigger_found=true" >> $GITHUB_OUTPUT
             echo "triggered_prs=$TRIGGERED_PRS" >> $GITHUB_OUTPUT
-
-            # Store newly processed comment IDs
-            echo "new_processed_ids<<EOF" >> $GITHUB_OUTPUT
-            echo -n "$NEW_PROCESSED_IDS" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
           else
             echo "trigger_found=false" >> $GITHUB_OUTPUT
             echo "No new /trigger commands found"
           fi
 
-      - name: Update state files
+      - name: Update timestamp
         if: always()
         run: |
           # Store current timestamp for next check
           CURRENT_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           echo "$CURRENT_TIME" > "${{ steps.last_check.outputs.state_file }}"
 
-          # Append newly processed comment IDs to the processed file
-          if [[ -n "${{ steps.check_triggers.outputs.new_processed_ids }}" ]]; then
-            echo "${{ steps.check_triggers.outputs.new_processed_ids }}" >> "${{ steps.last_check.outputs.processed_file }}"
-            echo "Added new processed comment IDs to state file"
-          fi
-
-          # Keep only last 1000 comment IDs to prevent file from growing too large
-          if [ -f "${{ steps.last_check.outputs.processed_file }}" ]; then
-            tail -n 1000 "${{ steps.last_check.outputs.processed_file }}" > "${{ steps.last_check.outputs.processed_file }}.tmp"
-            mv "${{ steps.last_check.outputs.processed_file }}.tmp" "${{ steps.last_check.outputs.processed_file }}"
-          fi
-
-          # Commit the state files if they changed
-          if git diff --quiet .github/poll-state/; then
-            echo "No changes to state files"
+          # Commit the timestamp file if it changed
+          if git diff --quiet "${{ steps.last_check.outputs.state_file }}"; then
+            echo "No changes to timestamp file"
           else
-            git add .github/poll-state/
-            git commit -m "Update PR polling state [skip ci]"
+            git add "${{ steps.last_check.outputs.state_file }}"
+            git commit -m "Update PR polling timestamp [skip ci]"
             git push origin HEAD:${{ github.ref_name }}
-            echo "Updated state files"
+            echo "Updated timestamp: $CURRENT_TIME"
           fi
 
       - name: Trigger CI workflow
@@ -252,6 +249,12 @@ jobs:
             echo "**Triggered by PRs:** ${{ steps.check_triggers.outputs.triggered_prs }}" >> $GITHUB_STEP_SUMMARY
             echo "**PR Branch:** ${{ steps.check_triggers.outputs.pr_branch }}" >> $GITHUB_STEP_SUMMARY
             echo "**PR Repository:** ${{ steps.check_triggers.outputs.pr_repo }}" >> $GITHUB_STEP_SUMMARY
+            echo "**PR Commit:** ${{ steps.check_triggers.outputs.pr_sha }}" >> $GITHUB_STEP_SUMMARY
           else
             echo "ℹ️ **No triggers found** - No action taken" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Reasons for no triggers:" >> $GITHUB_STEP_SUMMARY
+            echo "- No new \`/trigger\` comments found" >> $GITHUB_STEP_SUMMARY
+            echo "- OR workflow already running for PR" >> $GITHUB_STEP_SUMMARY
+            echo "- OR workflow already completed for current commit" >> $GITHUB_STEP_SUMMARY
           fi
