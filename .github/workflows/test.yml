@@ -2,34 +2,14 @@ name: Test Workflow
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
-  workflow_dispatch:  # Allow manual trigger
-
-concurrency:
-  group: poll-pr-triggers-${{ github.ref }}
-  cancel-in-progress: false
+    - cron: '*/2 * * * *'
+  workflow_dispatch:
 
 jobs:
-  check-pr-comments:
-    name: Check PR comments for /trigger
+  test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write  # Need write to update state file
-      actions: write   # Need to trigger workflows
     steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@v2
-        with:
-          egress-policy: audit
-
-      - name: Checkout current branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref }}
-          fetch-depth: 1
-
-      - name: Configure Git
+      - name: Print time
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          echo "Cron triggered at:"
+          date -u
