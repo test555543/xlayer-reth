@@ -135,8 +135,12 @@ jobs:
                     "/repos/${{ github.repository }}/actions/workflows/scheduler_xlayer.yml/runs?per_page=50" \
                     --jq '.workflow_runs[] | {id: .id, status: .status, conclusion: .conclusion}')
 
+                  RUNS_COUNT=$(echo "$WORKFLOW_RUNS" | grep -c "id" || echo "0")
+                  echo "   Found $RUNS_COUNT recent workflow runs to check"
+
                   FOUND_COMPLETED=false
                   FOUND_ACTIVE=false
+                  CHECKED_COUNT=0
 
                   # Check each workflow run to see if it was triggered with this pr_sha
                   while IFS= read -r run; do
@@ -149,8 +153,12 @@ jobs:
                     RUN_INPUTS=$(gh api "/repos/${{ github.repository }}/actions/runs/$RUN_ID" \
                       --jq '.inputs.pr_sha // empty' 2>/dev/null || echo "")
 
+                    CHECKED_COUNT=$((CHECKED_COUNT + 1))
+                    echo "   [${CHECKED_COUNT}] Run #$RUN_ID: status=$RUN_STATUS, pr_sha='$RUN_INPUTS'"
+
                     # Check if this run was triggered with the same PR SHA
                     if [ "$RUN_INPUTS" = "$PR_HEAD_SHA" ]; then
+                      echo "   ✓ Match found! Run #$RUN_ID has same pr_sha"
                       if [ "$RUN_STATUS" = "completed" ]; then
                         FOUND_COMPLETED=true
                         echo "   ⏭️  Skipping - Workflow already completed for commit ${PR_HEAD_SHA:0:8} (run #$RUN_ID)"
@@ -162,6 +170,8 @@ jobs:
                       fi
                     fi
                   done <<< "$WORKFLOW_RUNS"
+
+                  echo "   Checked $CHECKED_COUNT workflow runs"
 
                   # Skip triggering if we found an existing run
                   if [ "$FOUND_COMPLETED" = true ] || [ "$FOUND_ACTIVE" = true ]; then
