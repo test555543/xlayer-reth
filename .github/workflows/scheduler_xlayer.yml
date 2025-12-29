@@ -621,3 +621,110 @@ jobs:
             echo "Generated card preview:"
             cat lark_card.json | jq '.'
           fi
+
+
+  ##############################################################################
+  # Phase 4: Post PR Comment (if triggered by PR)
+  ##############################################################################
+
+  post-pr-comment:
+    name: Post CI Report to PR
+    runs-on: ubuntu-latest
+    needs: [sync-upstream, basic-checks, udeps, summary]
+    if: always() && github.event.inputs.triggered_by == 'pr-comment' && github.event.inputs.pr_numbers != ''
+    timeout-minutes: 10
+    permissions:
+      contents: none
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
+      - name: Generate CI report and post to PR
+        env:
+          GH_TOKEN: ${{ secrets.UPSTREAM_REPO_PAT }}
+          UPSTREAM_REPO: okx/xlayer-reth
+        run: |
+          # Extract PR number (remove # prefix)
+          PR_NUMBER=$(echo "${{ github.event.inputs.pr_numbers }}" | sed 's/#//' | awk '{print $1}')
+
+          echo "Posting CI report to PR #$PR_NUMBER in $UPSTREAM_REPO"
+
+          # Determine overall status
+          if [[ "${{ needs.sync-upstream.result }}" == "success" ]] && \
+             [[ "${{ needs.basic-checks.result }}" == "success" ]] && \
+             [[ "${{ needs.udeps.result }}" == "success" ]]; then
+            OVERALL_STATUS="✅ All Checks Passed"
+            STATUS_ICON="✅"
+          else
+            OVERALL_STATUS="❌ Some Checks Failed"
+            STATUS_ICON="❌"
+          fi
+
+          # Get status icons for each check
+          get_status_icon() {
+            if [[ "$1" == "success" ]]; then
+              echo "✅"
+            else
+              echo "❌"
+            fi
+          }
+
+          SYNC_ICON=$(get_status_icon "${{ needs.sync-upstream.result }}")
+          CHECKS_ICON=$(get_status_icon "${{ needs.basic-checks.result }}")
+          UDEPS_ICON=$(get_status_icon "${{ needs.udeps.result }}")
+
+          # Build comment body
+          cat > comment.md <<EOF
+          ## ${STATUS_ICON} CI Report
+
+          **Overall Status:** ${OVERALL_STATUS}
+
+          ### Test Results
+
+          | Check | Status |
+          |-------|--------|
+          | Upstream Sync | ${SYNC_ICON} ${{ needs.sync-upstream.result }} |
+          | Basic Checks | ${CHECKS_ICON} ${{ needs.basic-checks.result }} |
+          | Unused Dependencies | ${UDEPS_ICON} ${{ needs.udeps.result }} |
+
+          ### Details
+
+          - **Triggered by:** \`/trigger\` command
+          - **PR Branch:** \`${{ github.event.inputs.pr_branch }}\`
+          - **PR Repository:** ${{ github.event.inputs.pr_repo }}
+          - **Run ID:** ${{ github.run_id }}
+          - **Commit:** ${{ github.sha }}
+
+          [View Full CI Logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+          ---
+          <sub>🤖 Automated CI report from [xlayer-reth-ci](https://github.com/${{ github.repository }})</sub>
+          EOF
+
+          # Post comment to PR
+          if [ -n "$GH_TOKEN" ]; then
+            echo "Posting comment to PR..."
+            gh pr comment "$PR_NUMBER" \
+              --repo "$UPSTREAM_REPO" \
+              --body-file comment.md
+
+            if [ $? -eq 0 ]; then
+              echo "✅ Successfully posted CI report to PR #$PR_NUMBER"
+            else
+              echo "❌ Failed to post comment to PR"
+              exit 1
+            fi
+          else
+            echo "⚠️ UPSTREAM_REPO_PAT secret not configured. Cannot post comment."
+            echo ""
+            echo "To enable PR comments:"
+            echo "1. Create a Personal Access Token (PAT) with 'repo' scope"
+            echo "2. Go to GitHub repository Settings → Secrets → Actions"
+            echo "3. Add a new secret named 'UPSTREAM_REPO_PAT'"
+            echo "4. Paste your PAT as the value"
+            echo ""
+            echo "Comment preview:"
+            cat comment.md
+          fi
