@@ -1,8 +1,8 @@
 name: Poll PR Trigger Commands
 
 on:
-  #schedule:
-    # - cron: '*/5 * * * *'
+  schedule:
+    - cron: '*/2 * * * *'
   workflow_dispatch:  # Allow manual trigger
 
 concurrency:
