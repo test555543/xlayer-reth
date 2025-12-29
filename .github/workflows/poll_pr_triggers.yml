@@ -127,37 +127,10 @@ jobs:
                   echo "   PR Repo: $PR_REPO_OWNER/$PR_REPO_NAME"
                   echo "   PR Head SHA: $PR_HEAD_SHA"
 
-                  # Check for recent workflow runs (cooldown to prevent spam)
-                  echo "   Checking for recent workflow runs..."
-
-                  COOLDOWN_MINUTES=15
-                  COOLDOWN_TIME=$(date -u -d "$COOLDOWN_MINUTES minutes ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-${COOLDOWN_MINUTES}M +%Y-%m-%dT%H:%M:%SZ)
-
-                  # Check for any recent workflow_dispatch runs (can't identify by PR in displayTitle)
-                  RECENT_RUNS=$(gh run list \
-                    --repo "${{ github.repository }}" \
-                    --workflow scheduler_xlayer.yml \
-                    --limit 30 \
-                    --json status,conclusion,createdAt,event \
-                    | jq --arg since "$COOLDOWN_TIME" '[.[] | select(.event == "workflow_dispatch") | select(.createdAt > $since)]')
-
-                  RECENT_COUNT=$(echo "$RECENT_RUNS" | jq 'length')
-
-                  if [ "$RECENT_COUNT" -gt 0 ]; then
-                    LAST_STATUS=$(echo "$RECENT_RUNS" | jq -r '.[0].status')
-                    LAST_CONCLUSION=$(echo "$RECENT_RUNS" | jq -r '.[0].conclusion // "running"')
-                    LAST_TIME=$(echo "$RECENT_RUNS" | jq -r '.[0].createdAt')
-
-                    if [ "$LAST_STATUS" = "completed" ]; then
-                      echo "   ⏭️  Skipping: Workflow completed recently at $LAST_TIME (result: $LAST_CONCLUSION)"
-                    else
-                      echo "   ⏭️  Skipping: Workflow is currently $LAST_STATUS (started: $LAST_TIME)"
-                    fi
-                    echo "   💡 Cooldown: Wait $COOLDOWN_MINUTES minutes between triggers"
-                    continue
-                  fi
-
-                  echo "   ✓ No recent runs - will trigger CI"
+                  # Note: Concurrency group 'pr-ci-{commit_sha}' in scheduler_xlayer.yml
+                  # will automatically prevent duplicate runs on the same commit
+                  echo "   ✓ Will trigger CI"
+                  echo "   💡 Concurrency group will prevent duplicates for commit ${PR_HEAD_SHA:0:8}"
 
                   TRIGGERS_FOUND=$((TRIGGERS_FOUND + 1))
                   TRIGGERED_PRS="$TRIGGERED_PRS#$pr_number"
@@ -202,9 +175,9 @@ jobs:
           CURRENT_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           echo "$CURRENT_TIME" > "${{ steps.last_check.outputs.state_file }}"
 
-          # Commit the timestamp file if it changed
+          # Commit timestamp file if changed
           if git diff --quiet "${{ steps.last_check.outputs.state_file }}"; then
-            echo "No changes to timestamp file"
+            echo "No changes to timestamp"
           else
             git add "${{ steps.last_check.outputs.state_file }}"
             git commit -m "Update PR polling timestamp [skip ci]"
@@ -225,14 +198,15 @@ jobs:
 
           echo ""
           echo "🚀 Triggering CI workflow..."
-          echo "Note: Concurrency group will prevent any duplicate runs"
+          echo "Note: Concurrency group 'pr-ci-${{ steps.check_triggers.outputs.pr_sha }}' prevents duplicate runs on same commit"
           gh workflow run scheduler_xlayer.yml \
             --ref ${{ github.ref_name }} \
             --field triggered_by="pr-comment" \
             --field upstream_sha="" \
             --field pr_numbers="${{ steps.check_triggers.outputs.triggered_prs }}" \
             --field pr_branch="${{ steps.check_triggers.outputs.pr_branch }}" \
-            --field pr_repo="${{ steps.check_triggers.outputs.pr_repo }}"
+            --field pr_repo="${{ steps.check_triggers.outputs.pr_repo }}" \
+            --field pr_sha="${{ steps.check_triggers.outputs.pr_sha }}"
 
           echo "✅ Trigger request sent successfully"
 
