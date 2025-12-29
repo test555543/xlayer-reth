@@ -130,10 +130,10 @@ jobs:
                   # Check if workflow already ran for this commit SHA
                   echo "   Checking for existing workflow runs on this commit..."
 
-                  # Get recent workflow runs for scheduler_xlayer.yml
+                  # Get recent workflow runs for scheduler_xlayer.yml including display_title
                   WORKFLOW_RUNS=$(gh api \
                     "/repos/${{ github.repository }}/actions/workflows/scheduler_xlayer.yml/runs?per_page=50" \
-                    --jq '.workflow_runs[] | {id: .id, status: .status, conclusion: .conclusion}')
+                    --jq '.workflow_runs[] | {id: .id, status: .status, name: .display_title}')
 
                   RUNS_COUNT=$(echo "$WORKFLOW_RUNS" | grep -c "id" || echo "0")
                   echo "   Found $RUNS_COUNT recent workflow runs to check"
@@ -142,31 +142,25 @@ jobs:
                   FOUND_ACTIVE=false
                   CHECKED_COUNT=0
 
-                  # Check each workflow run to see if it was triggered with this pr_sha
+                  # Check each workflow run to see if its name contains this PR SHA
                   while IFS= read -r run; do
                     if [ -z "$run" ]; then continue; fi
 
                     RUN_ID=$(echo "$run" | jq -r '.id')
                     RUN_STATUS=$(echo "$run" | jq -r '.status')
-
-                    # Get the workflow run details including inputs
-                    RUN_DETAILS=$(gh api "/repos/${{ github.repository }}/actions/runs/$RUN_ID" 2>/dev/null || echo "{}")
-
-                    # Try to extract pr_sha from inputs (it might be in different locations)
-                    RUN_INPUTS=$(echo "$RUN_DETAILS" | jq -r '.inputs.pr_sha // empty' 2>/dev/null || echo "")
-
-                    # Debug: show all inputs for first run
-                    if [ $CHECKED_COUNT -eq 0 ]; then
-                      echo "   [DEBUG] First run inputs object:"
-                      echo "$RUN_DETAILS" | jq '.inputs' 2>/dev/null || echo "   (no inputs found)"
-                    fi
+                    RUN_NAME=$(echo "$run" | jq -r '.name // ""')
 
                     CHECKED_COUNT=$((CHECKED_COUNT + 1))
-                    echo "   [${CHECKED_COUNT}] Run #$RUN_ID: status=$RUN_STATUS, pr_sha='$RUN_INPUTS'"
 
-                    # Check if this run was triggered with the same PR SHA
-                    if [ "$RUN_INPUTS" = "$PR_HEAD_SHA" ]; then
-                      echo "   ✓ Match found! Run #$RUN_ID has same pr_sha"
+                    # Show first few runs for debugging
+                    if [ $CHECKED_COUNT -le 3 ]; then
+                      echo "   [${CHECKED_COUNT}] Run #$RUN_ID: status=$RUN_STATUS, name='$RUN_NAME'"
+                    fi
+
+                    # Check if the workflow run name contains the PR SHA
+                    # Run name format: "PR CI - {full_sha}" or "Scheduled CI"
+                    if [[ "$RUN_NAME" == *"$PR_HEAD_SHA"* ]]; then
+                      echo "   ✓ Match found! Run #$RUN_ID name contains commit SHA"
                       if [ "$RUN_STATUS" = "completed" ]; then
                         FOUND_COMPLETED=true
                         echo "   ⏭️  Skipping - Workflow already completed for commit ${PR_HEAD_SHA:0:8} (run #$RUN_ID)"
