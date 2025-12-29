@@ -27,9 +27,11 @@ on:
         default: ''
 
 # Ensure only one workflow runs at a time
+# For PR triggers, use PR number + commit SHA to prevent duplicates
+# For scheduled/auto triggers, use branch name
 concurrency:
-  group: scheduler-xlayer-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event.inputs.pr_numbers != '' && format('pr-{0}-{1}', github.event.inputs.pr_numbers, github.event.inputs.pr_branch) || format('scheduler-xlayer-{0}', github.ref) }}
+  cancel-in-progress: false  # Don't cancel, let it queue or skip
 
 env:
   CARGO_TERM_COLOR: always
