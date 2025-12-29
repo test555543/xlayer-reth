@@ -127,10 +127,48 @@ jobs:
                   echo "   PR Repo: $PR_REPO_OWNER/$PR_REPO_NAME"
                   echo "   PR Head SHA: $PR_HEAD_SHA"
 
-                  # Note: Concurrency group 'pr-ci-{commit_sha}' in scheduler_xlayer.yml
-                  # will automatically prevent duplicate runs on the same commit
-                  echo "   ✓ Will trigger CI"
-                  echo "   💡 Concurrency group will prevent duplicates for commit ${PR_HEAD_SHA:0:8}"
+                  # Check if workflow already ran for this commit SHA
+                  echo "   Checking for existing workflow runs on this commit..."
+
+                  # Get recent workflow runs for scheduler_xlayer.yml
+                  WORKFLOW_RUNS=$(gh api \
+                    "/repos/${{ github.repository }}/actions/workflows/scheduler_xlayer.yml/runs?per_page=50" \
+                    --jq '.workflow_runs[] | {id: .id, status: .status, conclusion: .conclusion}')
+
+                  FOUND_COMPLETED=false
+                  FOUND_ACTIVE=false
+
+                  # Check each workflow run to see if it was triggered with this pr_sha
+                  while IFS= read -r run; do
+                    if [ -z "$run" ]; then continue; fi
+
+                    RUN_ID=$(echo "$run" | jq -r '.id')
+                    RUN_STATUS=$(echo "$run" | jq -r '.status')
+
+                    # Get the workflow run inputs
+                    RUN_INPUTS=$(gh api "/repos/${{ github.repository }}/actions/runs/$RUN_ID" \
+                      --jq '.inputs.pr_sha // empty' 2>/dev/null || echo "")
+
+                    # Check if this run was triggered with the same PR SHA
+                    if [ "$RUN_INPUTS" = "$PR_HEAD_SHA" ]; then
+                      if [ "$RUN_STATUS" = "completed" ]; then
+                        FOUND_COMPLETED=true
+                        echo "   ⏭️  Skipping - Workflow already completed for commit ${PR_HEAD_SHA:0:8} (run #$RUN_ID)"
+                        break
+                      elif [ "$RUN_STATUS" = "in_progress" ] || [ "$RUN_STATUS" = "queued" ] || [ "$RUN_STATUS" = "waiting" ]; then
+                        FOUND_ACTIVE=true
+                        echo "   ⏭️  Skipping - Workflow already $RUN_STATUS for commit ${PR_HEAD_SHA:0:8} (run #$RUN_ID)"
+                        break
+                      fi
+                    fi
+                  done <<< "$WORKFLOW_RUNS"
+
+                  # Skip triggering if we found an existing run
+                  if [ "$FOUND_COMPLETED" = true ] || [ "$FOUND_ACTIVE" = true ]; then
+                    continue
+                  fi
+
+                  echo "   ✓ Will trigger CI - No previous run found for commit ${PR_HEAD_SHA:0:8}"
 
                   TRIGGERS_FOUND=$((TRIGGERS_FOUND + 1))
                   TRIGGERED_PRS="$TRIGGERED_PRS#$pr_number"
