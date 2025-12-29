@@ -149,9 +149,17 @@ jobs:
                     RUN_ID=$(echo "$run" | jq -r '.id')
                     RUN_STATUS=$(echo "$run" | jq -r '.status')
 
-                    # Get the workflow run inputs
-                    RUN_INPUTS=$(gh api "/repos/${{ github.repository }}/actions/runs/$RUN_ID" \
-                      --jq '.inputs.pr_sha // empty' 2>/dev/null || echo "")
+                    # Get the workflow run details including inputs
+                    RUN_DETAILS=$(gh api "/repos/${{ github.repository }}/actions/runs/$RUN_ID" 2>/dev/null || echo "{}")
+
+                    # Try to extract pr_sha from inputs (it might be in different locations)
+                    RUN_INPUTS=$(echo "$RUN_DETAILS" | jq -r '.inputs.pr_sha // empty' 2>/dev/null || echo "")
+
+                    # Debug: show all inputs for first run
+                    if [ $CHECKED_COUNT -eq 0 ]; then
+                      echo "   [DEBUG] First run inputs object:"
+                      echo "$RUN_DETAILS" | jq '.inputs' 2>/dev/null || echo "   (no inputs found)"
+                    fi
 
                     CHECKED_COUNT=$((CHECKED_COUNT + 1))
                     echo "   [${CHECKED_COUNT}] Run #$RUN_ID: status=$RUN_STATUS, pr_sha='$RUN_INPUTS'"
