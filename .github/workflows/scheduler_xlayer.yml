@@ -410,107 +410,13 @@ jobs:
           exit 1
 
   ##############################################################################
-  # Phase 3: Summary & Notification
+  # Phase 3: Notification
   ##############################################################################
-
-  summary:
-    name: Generate Summary Report
-    runs-on: ubuntu-latest
-    needs:
-      - sync-upstream
-      - basic-checks
-      - udeps
-
-    if: always()
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@v2
-        with:
-          egress-policy: audit
-
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref }}
-
-      - name: Generate comprehensive summary
-        run: |
-          # Determine overall status first
-          if [[ "${{ needs.sync-upstream.result }}" == "success" ]] && \
-             [[ "${{ needs.basic-checks.result }}" == "success" ]] && \
-             [[ "${{ needs.udeps.result }}" == "success" ]]; then
-            OVERALL_STATUS="SUCCESS"
-            STATUS_EMOJI="✅"
-            STATUS_COLOR="🟢"
-            echo "all_passed" > status.txt
-          else
-            OVERALL_STATUS="FAILED"
-            STATUS_EMOJI="❌"
-            STATUS_COLOR="🔴"
-            echo "some_failed" > status.txt
-          fi
-
-          echo "# 📊 X Layer Scheduled CI Report" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # Display overall status prominently at the top
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "# ${STATUS_COLOR} Overall Status: ${OVERALL_STATUS} ${STATUS_EMOJI}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "**Date:** $(date '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
-          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "## 🔍 Results Overview" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Category | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
-
-          # Upstream Sync
-          if [[ "${{ needs.sync-upstream.result }}" == "success" ]]; then
-            echo "| Upstream Sync | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| Upstream Sync | ❌ Failed (Conflict) |" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          # Basic Checks
-          if [[ "${{ needs.basic-checks.result }}" == "success" ]]; then
-            echo "| Basic Checks | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| Basic Checks | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          # Unused Dependencies Check
-          if [[ "${{ needs.udeps.result }}" == "success" ]]; then
-            echo "| Unused Dependencies | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| Unused Dependencies | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "View detailed logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
-
-      - name: Upload summary
-        uses: actions/upload-artifact@v4
-        with:
-          name: ci-summary
-          path: status.txt
-          retention-days: 30
-
 
   notify:
     name: Send Lark Notification
     runs-on: ubuntu-latest
-    needs: [sync-upstream, basic-checks, udeps, summary]
+    needs: [sync-upstream, basic-checks, udeps]
     if: always() && !cancelled()
     timeout-minutes: 10
     permissions:
@@ -725,7 +631,7 @@ jobs:
   post-pr-comment:
     name: Post CI Report to PR
     runs-on: ubuntu-latest
-    needs: [sync-upstream, basic-checks, udeps, summary]
+    needs: [sync-upstream, basic-checks, udeps]
     if: always() && github.event.inputs.triggered_by == 'pr-comment' && github.event.inputs.pr_numbers != ''
     timeout-minutes: 10
     permissions:
