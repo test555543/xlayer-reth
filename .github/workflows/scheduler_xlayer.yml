@@ -464,6 +464,15 @@ jobs:
           CURRENT_TIME=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
           COMMIT_SHORT="${GITHUB_SHA:0:8}"
 
+          # Determine if triggered by PR and set branch info accordingly
+          if [[ "${{ github.event.inputs.triggered_by }}" == "pr-comment" ]]; then
+            BRANCH_INFO="PR ${{ github.event.inputs.pr_numbers }} (${{ github.event.inputs.pr_branch }})"
+            TRIGGER_TYPE="🔔 PR Comment Trigger"
+          else
+            BRANCH_INFO="${{ github.ref_name }}"
+            TRIGGER_TYPE="⏰ Scheduled / Auto Trigger"
+          fi
+
           # Build status for each check
           get_status_icon() {
             if [[ "$1" == "success" ]]; then
@@ -504,7 +513,7 @@ jobs:
                       "is_short": true,
                       "text": {
                         "tag": "lark_md",
-                        "content": "**🔀 Branch**\\n${{ github.ref_name }}"
+                        "content": "**🔀 Branch/PR**\\n${BRANCH_INFO}"
                       }
                     },
                     {
@@ -518,7 +527,7 @@ jobs:
                       "is_short": true,
                       "text": {
                         "tag": "lark_md",
-                        "content": "**🔢 Run ID**\\n${{ github.run_id }}"
+                        "content": "**🔔 Trigger**\\n${TRIGGER_TYPE}"
                       }
                     }
                   ]
