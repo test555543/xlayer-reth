@@ -481,7 +481,7 @@ jobs:
     name: Send Lark Notification
     runs-on: ubuntu-latest
     needs: [sync-upstream, basic-checks, udeps, summary]
-    if: always()
+    if: always() && !cancelled()
     timeout-minutes: 10
     permissions:
       contents: none
@@ -495,6 +495,14 @@ jobs:
         env:
           LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
         run: |
+          # Check if workflow was cancelled
+          if [[ "${{ needs.sync-upstream.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.basic-checks.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.udeps.result }}" == "cancelled" ]]; then
+            echo "⏭️ Workflow was cancelled - skipping Lark notification"
+            exit 0
+          fi
+
           # Determine overall status and color based on actual test results
           if [[ "${{ needs.sync-upstream.result }}" == "success" ]] && \
              [[ "${{ needs.basic-checks.result }}" == "success" ]] && \
