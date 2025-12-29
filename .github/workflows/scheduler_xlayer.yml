@@ -225,9 +225,27 @@ jobs:
           ref: ${{ github.ref }}
           fetch-depth: 0
 
-      - name: Pull latest changes from sync
+      - name: Setup code for testing
         run: |
-          git pull origin ${{ github.ref_name }}
+          # Check if triggered by PR comment
+          if [[ -n "${{ inputs.pr_branch }}" && -n "${{ inputs.pr_repo }}" ]]; then
+            echo "🔀 Testing PR branch..."
+            echo "PR Repository: ${{ inputs.pr_repo }}"
+            echo "PR Branch: ${{ inputs.pr_branch }}"
+
+            # Add PR repo as remote and fetch the branch
+            PR_REPO_URL="https://github.com/${{ inputs.pr_repo }}.git"
+            git remote add pr-source "$PR_REPO_URL" || true
+            git fetch pr-source "${{ inputs.pr_branch }}"
+
+            # Checkout the PR branch content
+            git checkout pr-source/${{ inputs.pr_branch }} .
+            echo "✅ PR branch checked out for testing"
+          else
+            echo "📅 Scheduled/auto trigger - pulling from main..."
+            git pull origin ${{ github.ref_name }}
+            echo "✅ Latest changes pulled from main"
+          fi
 
       - uses: extractions/setup-just@v3
       - uses: dtolnay/rust-toolchain@stable
@@ -280,9 +298,27 @@ jobs:
           ref: ${{ github.ref }}
           fetch-depth: 0
 
-      - name: Pull latest changes from sync
+      - name: Setup code for testing
         run: |
-          git pull origin ${{ github.ref_name }}
+          # Check if triggered by PR comment
+          if [[ -n "${{ inputs.pr_branch }}" && -n "${{ inputs.pr_repo }}" ]]; then
+            echo "🔀 Testing PR branch..."
+            echo "PR Repository: ${{ inputs.pr_repo }}"
+            echo "PR Branch: ${{ inputs.pr_branch }}"
+
+            # Add PR repo as remote and fetch the branch
+            PR_REPO_URL="https://github.com/${{ inputs.pr_repo }}.git"
+            git remote add pr-source "$PR_REPO_URL" || true
+            git fetch pr-source "${{ inputs.pr_branch }}"
+
+            # Checkout the PR branch content
+            git checkout pr-source/${{ inputs.pr_branch }} .
+            echo "✅ PR branch checked out for testing"
+          else
+            echo "📅 Scheduled/auto trigger - pulling from main..."
+            git pull origin ${{ github.ref_name }}
+            echo "✅ Latest changes pulled from main"
+          fi
 
       - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
       - uses: dtolnay/rust-toolchain@0c3131df9e5407c0c36352032d04af846dbe0fb7 # nightly
