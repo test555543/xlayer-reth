@@ -1,0 +1,213 @@
+name: Poll PR Trigger Commands
+
+on:
+  schedule:
+    # Run every 5 minutes to catch /trigger commands quickly
+    - cron: '*/5 * * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+concurrency:
+  group: poll-pr-triggers-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UPSTREAM_REPO: okx/xlayer-reth  # Change this to the repo you want to monitor
+  TRIGGER_COMMAND: /trigger
+
+jobs:
+  check-pr-comments:
+    name: Check PR comments for /trigger
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write  # Need write to update state file
+      actions: write   # Need to trigger workflows
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
+      - name: Checkout current branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 1
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create state directory if needed
+        run: |
+          mkdir -p .github/poll-state
+
+      - name: Get last checked timestamp
+        id: last_check
+        run: |
+          STATE_FILE=".github/poll-state/last-pr-comment-check.txt"
+
+          if [ -f "$STATE_FILE" ]; then
+            LAST_CHECKED=$(cat "$STATE_FILE")
+            echo "Last checked: $LAST_CHECKED"
+          else
+            # First run - check comments from last 1 hour
+            LAST_CHECKED=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1H +%Y-%m-%dT%H:%M:%SZ)
+            echo "First run - checking since: $LAST_CHECKED"
+          fi
+
+          echo "last_checked=$LAST_CHECKED" >> $GITHUB_OUTPUT
+          echo "state_file=$STATE_FILE" >> $GITHUB_OUTPUT
+
+      - name: Check for /trigger commands in PR comments
+        id: check_triggers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LAST_CHECKED: ${{ steps.last_check.outputs.last_checked }}
+        run: |
+          echo "Checking for '$TRIGGER_COMMAND' in open PRs on $UPSTREAM_REPO"
+          echo "Looking for comments since: $LAST_CHECKED"
+          echo ""
+
+          # Get all open PRs (excluding drafts)
+          echo "Fetching open PRs..."
+          OPEN_PRS=$(gh pr list \
+            --repo "$UPSTREAM_REPO" \
+            --state open \
+            --json number,title,isDraft,updatedAt \
+            --limit 100)
+
+          # Filter out draft PRs
+          NON_DRAFT_PRS=$(echo "$OPEN_PRS" | jq '[.[] | select(.isDraft == false)]')
+          PR_COUNT=$(echo "$NON_DRAFT_PRS" | jq 'length')
+
+          echo "Found $PR_COUNT open (non-draft) PRs"
+
+          TRIGGERS_FOUND=0
+          TRIGGERED_PRS=""
+
+          # Store PR branch info for triggering
+          declare -A PR_BRANCHES
+          declare -A PR_REPOS
+
+          # Check each PR for /trigger comments
+          for pr_number in $(echo "$NON_DRAFT_PRS" | jq -r '.[].number'); do
+            echo "Checking PR #$pr_number..."
+
+            # Get comments for this PR since last check
+            COMMENTS=$(gh api \
+              "/repos/$UPSTREAM_REPO/issues/$pr_number/comments" \
+              --jq ".[] | select(.created_at > \"$LAST_CHECKED\") | {id: .id, body: .body, created_at: .created_at, user: .user.login}")
+
+            if [ -n "$COMMENTS" ]; then
+              # Check if any comment contains /trigger
+              while IFS= read -r comment; do
+                BODY=$(echo "$comment" | jq -r '.body // empty')
+
+                # Check if comment contains /trigger (case-insensitive, allow it anywhere in comment)
+                if echo "$BODY" | grep -iq "^${TRIGGER_COMMAND}\s*$\|^${TRIGGER_COMMAND}\s\|${TRIGGER_COMMAND}$"; then
+                  COMMENT_ID=$(echo "$comment" | jq -r '.id')
+                  COMMENT_USER=$(echo "$comment" | jq -r '.user')
+                  COMMENT_DATE=$(echo "$comment" | jq -r '.created_at')
+
+                  # Get PR details including head branch
+                  PR_INFO=$(gh pr view "$pr_number" --repo "$UPSTREAM_REPO" --json headRefName,headRepository,headRepositoryOwner)
+                  PR_BRANCH=$(echo "$PR_INFO" | jq -r '.headRefName')
+                  PR_REPO_OWNER=$(echo "$PR_INFO" | jq -r '.headRepositoryOwner.login')
+                  PR_REPO_NAME=$(echo "$PR_INFO" | jq -r '.headRepository.name')
+
+                  echo "✅ Found $TRIGGER_COMMAND in PR #$pr_number"
+                  echo "   Comment ID: $COMMENT_ID"
+                  echo "   User: $COMMENT_USER"
+                  echo "   Date: $COMMENT_DATE"
+                  echo "   PR Branch: $PR_BRANCH"
+                  echo "   PR Repo: $PR_REPO_OWNER/$PR_REPO_NAME"
+
+                  TRIGGERS_FOUND=$((TRIGGERS_FOUND + 1))
+                  TRIGGERED_PRS="$TRIGGERED_PRS#$pr_number"
+
+                  # Store branch and repo info (use first triggered PR if multiple)
+                  if [ -z "${PR_BRANCHES[$pr_number]}" ]; then
+                    PR_BRANCHES[$pr_number]="$PR_BRANCH"
+                    PR_REPOS[$pr_number]="$PR_REPO_OWNER/$PR_REPO_NAME"
+                  fi
+
+                  # Only trigger once even if multiple /trigger comments found
+                  break
+                fi
+              done <<< "$(echo "$COMMENTS" | jq -c '.')"
+            fi
+          done
+
+          # Export PR branch info for the first triggered PR
+          if [ $TRIGGERS_FOUND -gt 0 ]; then
+            FIRST_PR=$(echo "$TRIGGERED_PRS" | cut -d'#' -f2 | cut -d' ' -f1)
+            echo "pr_branch=${PR_BRANCHES[$FIRST_PR]}" >> $GITHUB_OUTPUT
+            echo "pr_repo=${PR_REPOS[$FIRST_PR]}" >> $GITHUB_OUTPUT
+          fi
+
+          echo ""
+          echo "Total triggers found: $TRIGGERS_FOUND"
+
+          if [ $TRIGGERS_FOUND -gt 0 ]; then
+            echo "trigger_found=true" >> $GITHUB_OUTPUT
+            echo "triggered_prs=$TRIGGERED_PRS" >> $GITHUB_OUTPUT
+          else
+            echo "trigger_found=false" >> $GITHUB_OUTPUT
+            echo "No new /trigger commands found"
+          fi
+
+      - name: Update last checked timestamp
+        run: |
+          # Store current timestamp for next check
+          CURRENT_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "$CURRENT_TIME" > "${{ steps.last_check.outputs.state_file }}"
+
+          # Commit the state file if it changed
+          if git diff --quiet "${{ steps.last_check.outputs.state_file }}"; then
+            echo "No changes to state file"
+          else
+            git add "${{ steps.last_check.outputs.state_file }}"
+            git commit -m "Update PR comment check timestamp [skip ci]"
+            git push origin HEAD:${{ github.ref_name }}
+            echo "Updated state file with timestamp: $CURRENT_TIME"
+          fi
+
+      - name: Trigger CI workflow
+        if: steps.check_triggers.outputs.trigger_found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "🚀 Triggering scheduler_xlayer.yml workflow..."
+          echo "Triggered by PR(s): ${{ steps.check_triggers.outputs.triggered_prs }}"
+          echo "PR Branch: ${{ steps.check_triggers.outputs.pr_branch }}"
+          echo "PR Repo: ${{ steps.check_triggers.outputs.pr_repo }}"
+
+          gh workflow run scheduler_xlayer.yml \
+            --ref ${{ github.ref_name }} \
+            --field triggered_by="pr-comment" \
+            --field upstream_sha="" \
+            --field pr_numbers="${{ steps.check_triggers.outputs.triggered_prs }}" \
+            --field pr_branch="${{ steps.check_triggers.outputs.pr_branch }}" \
+            --field pr_repo="${{ steps.check_triggers.outputs.pr_repo }}"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## 🔍 PR Trigger Comment Polling" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Upstream Repository:** https://github.com/$UPSTREAM_REPO" >> $GITHUB_STEP_SUMMARY
+          echo "**Trigger Command:** \`$TRIGGER_COMMAND\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Checked Since:** ${{ steps.last_check.outputs.last_checked }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ steps.check_triggers.outputs.trigger_found }}" == "true" ]]; then
+            echo "✅ **Trigger found!** - CI workflow triggered" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Triggered by PRs:** ${{ steps.check_triggers.outputs.triggered_prs }}" >> $GITHUB_STEP_SUMMARY
+            echo "**PR Branch:** ${{ steps.check_triggers.outputs.pr_branch }}" >> $GITHUB_STEP_SUMMARY
+            echo "**PR Repository:** ${{ steps.check_triggers.outputs.pr_repo }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "ℹ️ **No triggers found** - No action taken" >> $GITHUB_STEP_SUMMARY
+          fi
