@@ -237,16 +237,33 @@ jobs:
 
           PR_NUM=$(echo "${{ steps.check_triggers.outputs.triggered_prs }}" | sed 's/#//')
 
-          # Re-check for running workflows
-          RUNNING_NOW=$(gh run list \
+          # Re-check for running/queued workflows (check each status separately)
+          RUNNING_COUNT=$(gh run list \
             --repo "${{ github.repository }}" \
             --workflow scheduler_xlayer.yml \
-            --status in_progress,queued,waiting \
+            --status in_progress \
             --json databaseId,displayTitle \
             --limit 20 | jq --arg pr "#$PR_NUM" '[.[] | select(.displayTitle | contains($pr))] | length')
 
-          if [ "$RUNNING_NOW" -gt 0 ]; then
-            echo "⏭️  Aborting: Detected $RUNNING_NOW running/queued workflow(s) for this PR during final check"
+          QUEUED_COUNT=$(gh run list \
+            --repo "${{ github.repository }}" \
+            --workflow scheduler_xlayer.yml \
+            --status queued \
+            --json databaseId,displayTitle \
+            --limit 20 | jq --arg pr "#$PR_NUM" '[.[] | select(.displayTitle | contains($pr))] | length')
+
+          WAITING_COUNT=$(gh run list \
+            --repo "${{ github.repository }}" \
+            --workflow scheduler_xlayer.yml \
+            --status waiting \
+            --json databaseId,displayTitle \
+            --limit 20 | jq --arg pr "#$PR_NUM" '[.[] | select(.displayTitle | contains($pr))] | length')
+
+          TOTAL_ACTIVE=$((${RUNNING_COUNT:-0} + ${QUEUED_COUNT:-0} + ${WAITING_COUNT:-0}))
+
+          if [ "$TOTAL_ACTIVE" -gt 0 ]; then
+            echo "⏭️  Aborting: Detected $TOTAL_ACTIVE active workflow(s) for this PR during final check"
+            echo "   In progress: ${RUNNING_COUNT:-0}, Queued: ${QUEUED_COUNT:-0}, Waiting: ${WAITING_COUNT:-0}"
             exit 0
           fi
 
