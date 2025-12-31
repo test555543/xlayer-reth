@@ -270,8 +270,17 @@ jobs:
           echo "Disk space after cleanup:"
           df -h
 
+      - name: Get Rust version from Cargo.toml
+        id: rust-version
+        run: |
+          RUST_VERSION=$(grep '^rust-version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          echo "Rust version from Cargo.toml: $RUST_VERSION"
+          echo "version=$RUST_VERSION" >> $GITHUB_OUTPUT
+
       - uses: extractions/setup-just@v3
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust-version.outputs.version }}
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: false
