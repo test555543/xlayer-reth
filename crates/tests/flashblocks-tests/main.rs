@@ -1269,7 +1269,7 @@ async fn fb_benchmark_new_transactions_subscription_test() -> Result<()> {
     println!("Connected successfully");
 
     let subscription_params = json!({
-        "headerInfo": true,
+        "headerInfo": false,
         "subTxFilter": {
             "txInfo": true,
             "txReceipt": true,
