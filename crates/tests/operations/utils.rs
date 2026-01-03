@@ -600,17 +600,13 @@ pub fn validate_internal_transaction(
 
 /// Check if a flashblocks notification contains a specific transaction hash
 pub fn contains_tx_hash(notification: &serde_json::Value, tx_hash: &str) -> bool {
-    let Some(transactions) = notification.get("transactions").and_then(|t| t.as_array()) else {
+    let Some(tx_hash_str) = notification
+        .get("transaction")
+        .and_then(|tx| tx.get("txHash"))
+        .and_then(serde_json::Value::as_str)
+    else {
         return false;
     };
 
-    for tx in transactions {
-        if let Some(tx_hash_str) = tx.get("txHash").and_then(|h| h.as_str())
-            && tx_hash_str == tx_hash
-        {
-            return true;
-        }
-    }
-
-    false
+    tx_hash_str == tx_hash
 }
