@@ -149,7 +149,7 @@ jobs:
         if: steps.merge.outputs.merge_status == 'success'
         run: |
           # Get latest commit before merge commit. 
-          COMMIT=$(git rev-parse $(git log --merges -1 --pretty=format:"%H")^2)
+          COMMIT=$(git rev-parse $(git log --merges -1 --pretty=format:"%H")^1)
           COMMIT_SHORT="${COMMIT:0:8}"
           echo "commit_short=$COMMIT_SHORT" >> $GITHUB_OUTPUT
           echo "Captured xlayer-reth commit: $COMMIT_SHORT"
@@ -229,10 +229,15 @@ jobs:
     name: Basic Checks
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      sweep_check: ${{ steps.sweep_check.outcome }}
+      format_check: ${{ steps.format_check.outcome }}
+      clippy_check: ${{ steps.clippy_check.outcome }}
+      test: ${{ steps.test.outcome }}
     permissions:
       contents: read
     strategy:
-      fail-fast: true
+      fail-fast: false
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@v2
@@ -298,26 +303,74 @@ jobs:
         with:
           cache-on-failure: false
 
-      - name: Run justfile check
-        id: run_checks
+      - name: Run sweep-check
+        id: sweep_check
         continue-on-error: true
         run: |
-          just check
+          # Upstream flashblocks inner dependency reth-optimism-primitives does not
+          # specify feats reth-codec and serde-bincode-compat. So we skip.
+          just sweep-check xlayer-innertx
+
+      - name: Run format check
+        id: format_check
+        continue-on-error: true
+        run: |
+          just check-format
+
+      - name: Run clippy
+        id: clippy_check
+        continue-on-error: true
+        run: |
+          just check-clippy
+
+      - name: Run tests
+        id: test
+        continue-on-error: true
+        run: |
+          just test
 
       - name: Generate test summary
         if: always()
         run: |
-          echo "## 🧪 Basic Checks " >> $GITHUB_STEP_SUMMARY
-          if [ "${{ steps.run_checks.outcome }}" == "success" ]; then
+          echo "## 🧪 Basic Checks" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Function to get status icon
+          get_icon() {
+            if [[ "$1" == "success" ]]; then
+              echo "✅"
+            else
+              echo "❌"
+            fi
+          }
+
+          SWEEP_ICON=$(get_icon "${{ steps.sweep_check.outcome }}")
+          FORMAT_ICON=$(get_icon "${{ steps.format_check.outcome }}")
+          CLIPPY_ICON=$(get_icon "${{ steps.clippy_check.outcome }}")
+          TEST_ICON=$(get_icon "${{ steps.test.outcome }}")
+
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Sweep Check | ${SWEEP_ICON} ${{ steps.sweep_check.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Format Check | ${FORMAT_ICON} ${{ steps.format_check.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Clippy | ${CLIPPY_ICON} ${{ steps.clippy_check.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ${TEST_ICON} ${{ steps.test.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Overall status
+          if [[ "${{ steps.sweep_check.outcome }}" == "success" ]] && \
+             [[ "${{ steps.format_check.outcome }}" == "success" ]] && \
+             [[ "${{ steps.clippy_check.outcome }}" == "success" ]] && \
+             [[ "${{ steps.test.outcome }}" == "success" ]]; then
             echo "✅ **All checks passed**" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ **Some checks failed**" >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Fail workflow if checks failed
-        if: steps.run_checks.outcome != 'success'
+        if: steps.sweep_check.outcome != 'success' || steps.format_check.outcome != 'success' || steps.clippy_check.outcome != 'success' || steps.test.outcome != 'success'
         run: |
-          echo "::error::Checks failed. Please review the errors above."
+          echo "::error::Some checks failed. Please review the errors above."
           exit 1
 
   ##############################################################################
@@ -501,7 +554,10 @@ jobs:
           }
 
           SYNC_ICON=$(get_status_icon "${{ needs.sync-upstream.result }}")
-          UNIT_ICON=$(get_status_icon "${{ needs.basic-checks.result }}")
+          SWEEP_ICON=$(get_status_icon "${{ needs.basic-checks.outputs.sweep_check }}")
+          FORMAT_ICON=$(get_status_icon "${{ needs.basic-checks.outputs.format_check }}")
+          CLIPPY_ICON=$(get_status_icon "${{ needs.basic-checks.outputs.clippy_check }}")
+          TEST_ICON=$(get_status_icon "${{ needs.basic-checks.outputs.test }}")
           UDEPS_ICON=$(get_status_icon "${{ needs.udeps.result }}")
 
           # Build Lark Card JSON
@@ -574,7 +630,28 @@ jobs:
                       "is_short": true,
                       "text": {
                         "tag": "lark_md",
-                        "content": "${UNIT_ICON} Basic Checks"
+                        "content": "${SWEEP_ICON} Sweep Check"
+                      }
+                    },
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "${FORMAT_ICON} Format Check"
+                      }
+                    },
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "${CLIPPY_ICON} Clippy"
+                      }
+                    },
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "${TEST_ICON} Tests"
                       }
                     },
                     {
