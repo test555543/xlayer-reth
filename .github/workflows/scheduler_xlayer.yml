@@ -53,6 +53,8 @@ jobs:
     name: Sync from upstream (okx/reth)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      xlayer_reth_commit: ${{ steps.get_commit.outputs.commit_short }}
     permissions:
       contents: write  # Required for pushing merged changes
       pull-requests: none
@@ -141,6 +143,16 @@ jobs:
               exit 1
             fi
           fi
+
+      - name: Capture xlayer-reth commit
+        id: get_commit
+        if: steps.merge.outputs.merge_status == 'success'
+        run: |
+          # Get latest commit before merge commit. 
+          COMMIT=$(git rev-parse upstream/main^2)
+          COMMIT_SHORT="${COMMIT:0:8}"
+          echo "commit_short=$COMMIT_SHORT" >> $GITHUB_OUTPUT
+          echo "Captured xlayer-reth commit: $COMMIT_SHORT"
 
       - name: Push merged changes
         if: steps.merge.outputs.merge_status == 'success' && steps.merge.outputs.source == 'upstream-main'
@@ -467,13 +479,8 @@ jobs:
           # Get current time in Beijing timezone
           CURRENT_TIME=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
 
-          # Determine commit to display (PR commit if triggered by PR, otherwise CI repo commit)
-          if [[ -n "${{ github.event.inputs.pr_sha }}" ]]; then
-            COMMIT_SHORT="${{ github.event.inputs.pr_sha }}"
-            COMMIT_SHORT="${COMMIT_SHORT:0:8}"
-          else
-            COMMIT_SHORT="${GITHUB_SHA:0:8}"
-          fi
+          # Use the xlayer-reth commit captured from sync-upstream job
+          COMMIT_SHORT="${{ needs.sync-upstream.outputs.xlayer_reth_commit }}"
 
           # Determine if triggered by PR and set branch info accordingly
           if [[ "${{ github.event.inputs.triggered_by }}" == "pr-comment" ]]; then
