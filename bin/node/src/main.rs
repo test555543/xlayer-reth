@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use args_xlayer::XLayerArgs;
 use clap::Parser;
-use tracing::{error, info, warn};
+use tracing::{error, info, trace};
 
 use op_rbuilder::{
     args::OpRbuilderArgs,
@@ -185,7 +185,7 @@ fn main() {
                             info!(target: "reth::cli", "xlayer innertx rpc enabled");
                         }
 
-                        if let Some(flashblock_rx) = new_op_eth_api.subscribe_received_flashblocks() {
+                        if args.xlayer_args.enable_flashblocks_subscription && let Some(flashblock_rx) = new_op_eth_api.subscribe_received_flashblocks() {
                             let service = FlashblocksService::new(
                                 ctx.node().clone(),
                                 flashblock_rx,
@@ -194,7 +194,7 @@ fn main() {
                             service.spawn();
                             info!(target: "reth::cli", "xlayer flashblocks service initialized");
                         } else {
-                            warn!(target: "reth::cli", "unable to get flashblock receiver, xlayer flashblocks service not initialized");
+                            trace!(target: "reth::cli", "unable to get flashblock receiver, xlayer flashblocks service not initialized");
                         }
 
                         if let Some(pending_blocks_rx) = new_op_eth_api.pending_block_rx() {
@@ -212,7 +212,7 @@ fn main() {
                             )?;
                             info!(target: "reth::cli", "xlayer eth pubsub initialized");
                         } else {
-                            warn!(target: "reth::cli", "unable to get pending blocks receiver, flashblocks eth pubsub not replaced");
+                            trace!(target: "reth::cli", "unable to get pending blocks receiver, flashblocks pubsub not initialized");
                         }
 
                         // Register XLayer RPC
