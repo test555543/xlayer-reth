@@ -4,7 +4,7 @@
 //! Run all tests (including ignored): `cargo test -p xlayer-e2e-test --test flashblocks_tests -- --include-ignored --nocapture --test-threads=1`
 //! Run a specific test: `cargo test -p xlayer-e2e-test --test flashblocks_tests -- <test_case_name> --include-ignored --nocapture --test-threads=1`
 
-use alloy_primitives::{hex, keccak256, Address, U256};
+use alloy_primitives::{hex, Address, U256};
 use alloy_sol_types::{sol, SolCall};
 use eyre::Result;
 use futures_util::StreamExt;
@@ -888,26 +888,34 @@ async fn fb_rpc_comparison_test(#[case] test_name: &str) {
     }
 }
 
-#[ignore = "Requires a second non-flashblock RPC node to be running"]
+#[ignore = "Requires sequencer 2 and RPC node with flashblocks enabled to be running"]
 #[tokio::test]
 async fn fb_subscription_test() -> Result<()> {
-    let ws_url = operations::manager::DEFAULT_FLASHBLOCKS_WS_URL;
-    let test_address = operations::DEFAULT_L2_NEW_ACC1_ADDRESS;
-    let non_fb_client = operations::create_test_client(operations::DEFAULT_L2_NETWORK_URL_NO_FB);
+    // Source of flashblocks is from the RPC node which obtains flashblocks from the sequencer
+    let ws_url_seq = operations::manager::DEFAULT_SEQ_FLASHBLOCKS_WS_URL;
+    let ws_url_seq2 = operations::manager::DEFAULT_SEQ_2_FLASHBLOCKS_WS_URL;
+    let ws_url_rpc = operations::manager::DEFAULT_RPC_FLASHBLOCKS_WS_URL;
 
-    let current_block_number = operations::eth_block_number(&non_fb_client)
+    let test_address = operations::DEFAULT_L2_NEW_ACC1_ADDRESS;
+    let rpc_client = operations::create_test_client(operations::DEFAULT_L2_NETWORK_URL);
+
+    let current_block_number = operations::eth_block_number(&rpc_client)
         .await
         .expect("Failed to get current block number");
     println!("Current block number: {current_block_number}");
 
     let num_txs: usize = 5;
 
-    println!("Connecting to flashblocks WebSocket at {ws_url}...");
-    let (ws_stream, response) = connect_async(ws_url).await?;
-    println!("Connected: {:?}", response.status());
-    let (_, mut read) = ws_stream.split();
+    let (ws_stream_seq, _) = connect_async(ws_url_seq).await?;
+    let (_, mut read_seq) = ws_stream_seq.split();
 
-    let mut remaining: HashSet<String> = HashSet::new();
+    let (ws_stream_seq2, _) = connect_async(ws_url_seq2).await?;
+    let (_, mut read_seq2) = ws_stream_seq2.split();
+
+    let (ws_stream_rpc, _) = connect_async(ws_url_rpc).await?;
+    let (_, mut read_rpc) = ws_stream_rpc.split();
+
+    let mut count: HashMap<String, u64> = HashMap::new();
     for i in 0..num_txs {
         let tx_hash = operations::native_balance_transfer(
             operations::DEFAULT_L2_NETWORK_URL_FB,
@@ -917,88 +925,51 @@ async fn fb_subscription_test() -> Result<()> {
         )
         .await?;
         println!("Sent tx {}: {}", i + 1, tx_hash);
-        remaining.insert(tx_hash);
+        count.insert(tx_hash, 0);
     }
-    let total = remaining.len();
     println!(
-        "Waiting for {total} txs to appear in flashblocks (timeout: {WEB_SOCKET_TIMEOUT:?})..."
+        "Waiting for {num_txs} txs to appear in flashblocks (timeout: {WEB_SOCKET_TIMEOUT:?})..."
     );
 
     // Read flashblocks until all txs are found or timeout
-    let result = tokio::time::timeout(WEB_SOCKET_TIMEOUT, async {
-        while !remaining.is_empty() {
-            match read.next().await {
-                Some(Ok(Message::Text(msg))) => {
-                    let Ok(notification) = serde_json::from_str::<serde_json::Value>(&msg) else {
-                        continue;
-                    };
+    let _ = tokio::time::timeout(WEB_SOCKET_TIMEOUT, async {
+        loop {
+            // Check if all transactions have been seen exactly twice
+            let all_found = count.values().all(|&c| c >= 3);
+            if all_found {
+                break;
+            }
 
-                    let block_num = notification["metadata"]["block_number"]
-                        .as_u64()
-                        .expect("Failed to get block number");
-
-                    assert!(
-                        block_num >= current_block_number,
-                        "Flashblock block number {block_num} should be >= current block {current_block_number}"
-                    );
-
-                    if let Some(txs) = notification["diff"]["transactions"].as_array() {
-                        for tx in txs {
-                            let Some(tx_rlp_hex) = tx.as_str() else { continue };
-                            let raw = tx_rlp_hex.trim_start_matches("0x");
-                            let Ok(bytes) = hex::decode(raw) else {
-                                eprintln!("Failed to hex-decode RLP: {tx_rlp_hex}");
-                                continue;
-                            };
-
-                            let hash = keccak256(&bytes);
-                            let hash_str = format!("0x{}", hex::encode(hash));
-
-                            if remaining.remove(&hash_str) {
-                                let found = total - remaining.len();
-                                println!(
-                                    "Found tx {found}/{total} in block {block_num}: {hash_str}"
-                                );
-                                if remaining.is_empty() {
-                                    break;
-                                }
-                            }
-                        }
+            tokio::select! {
+                msg_seq = read_seq.next() => {
+                    // Process message from sequencer stream
+                    if let Some(Ok(Message::Text(msg))) = msg_seq {
+                        operations::process_flashblock_message(&msg, &mut count, current_block_number, "SEQ");
                     }
                 }
-                Some(Ok(_)) => {} // ignore non-text
-                Some(Err(e)) => {
-                    eprintln!("WebSocket error: {e}");
-                    break;
+                msg_seq2 = read_seq2.next() => {
+                    // Process message from sequencer stream
+                    if let Some(Ok(Message::Text(msg))) = msg_seq2 {
+                        operations::process_flashblock_message(&msg, &mut count, current_block_number, "SEQ2");
+                    }
                 }
-                None => {
-                    eprintln!("WebSocket closed");
-                    break;
+                msg_rpc = read_rpc.next() => {
+                    // Process message from RPC stream
+                    if let Some(Ok(Message::Text(msg))) = msg_rpc {
+                        operations::process_flashblock_message(&msg, &mut count, current_block_number, "RPC");
+                    }
                 }
             }
         }
     })
     .await;
 
-    if result.is_err() {
-        eprintln!("Timeout: Stopped waiting after {WEB_SOCKET_TIMEOUT:?}");
+    for (tx_hash, &count_val) in &count {
+        assert_eq!(
+            count_val, 3,
+            "Transaction {tx_hash} appeared {count_val} times, expected exactly 3"
+        );
     }
-
-    if !remaining.is_empty() {
-        eprintln!("\nMissing txs in flashblocks:");
-        for tx in &remaining {
-            eprintln!("  - {tx}");
-        }
-    }
-
-    assert!(
-        remaining.is_empty(),
-        "Expected all {} txs to appear in flashblocks, but {} were missing",
-        total,
-        remaining.len()
-    );
-
-    println!("All {total} transactions found in flashblocks");
 
     Ok(())
 }
