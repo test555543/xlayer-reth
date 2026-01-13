@@ -13,7 +13,7 @@ use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{sol, SolCall, SolValue};
 use eyre::{eyre, Result};
 use serde_json;
-use std::{str::FromStr, sync::OnceLock};
+use std::{collections::HashMap, str::FromStr, sync::OnceLock};
 use tokio::time::{sleep, Duration};
 
 static DEPLOYED_CONTRACTS: OnceLock<DeployedContracts> = OnceLock::new();
@@ -562,4 +562,43 @@ pub fn contains_tx_hash(notification: &serde_json::Value, tx_hash: &str) -> bool
     };
 
     tx_hash_str == tx_hash
+}
+
+pub fn process_flashblock_message(
+    msg: &str,
+    count: &mut HashMap<String, u64>,
+    current_block_number: u64,
+    source: &str,
+) {
+    let Ok(notification) = serde_json::from_str::<serde_json::Value>(msg) else {
+        return;
+    };
+
+    let Some(block_num) = notification["metadata"]["block_number"].as_u64() else {
+        return;
+    };
+
+    assert!(
+        block_num >= current_block_number,
+        "Flashblock block number {block_num} should be >= current block {current_block_number}"
+    );
+
+    if let Some(txs) = notification["diff"]["transactions"].as_array() {
+        for tx in txs {
+            let Some(tx_rlp_hex) = tx.as_str() else { continue };
+            let raw = tx_rlp_hex.trim_start_matches("0x");
+            let Ok(bytes) = hex::decode(raw) else {
+                eprintln!("Failed to hex-decode RLP: {tx_rlp_hex}");
+                continue;
+            };
+
+            let hash = alloy_primitives::keccak256(&bytes);
+            let hash_str = format!("0x{}", hex::encode(hash));
+
+            if let Some(c) = count.get_mut(&hash_str) {
+                *c += 1;
+                println!("[{source}] Found tx in block {block_num}: {hash_str} (count: {c})");
+            }
+        }
+    }
 }
