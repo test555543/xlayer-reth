@@ -409,11 +409,7 @@ pub trait PreExec: EthCall {
                 .map(|(idx, log)| alloy_rpc_types_eth::Log {
                     inner: log.clone(),
                     block_hash,
-                    block_number: Some(
-                        block_number
-                            .saturating_sub(alloy_primitives::U256::from(1))
-                            .saturating_to(),
-                    ),
+                    block_number: Some(block_number.saturating_to()),
                     transaction_hash: Some(tx_hash),
                     transaction_index: Some(tx_index),
                     log_index: Some(idx as u64),
