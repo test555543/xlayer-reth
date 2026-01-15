@@ -103,6 +103,7 @@ reth-revm = { git = "https://github.com/okx/reth", rev = "3ba1e5d3820fff48ade796
 reth-rpc = { git = "https://github.com/okx/reth", rev = "3ba1e5d3820fff48ade7962769cb367ac183ba92" }
 reth-rpc-convert = { git = "https://github.com/okx/reth", rev = "3ba1e5d3820fff48ade7962769cb367ac183ba92" }
 reth-rpc-eth-api = { git = "https://github.com/okx/reth", rev = "3ba1e5d3820fff48ade7962769cb367ac183ba92" }
+reth-rpc-eth-types = { git = "https://github.com/okx/reth", rev = "3ba1e5d3820fff48ade7962769cb367ac183ba92" }
 reth-storage-api = { git = "https://github.com/okx/reth", rev = "3ba1e5d3820fff48ade7962769cb367ac183ba92" }
 reth-tasks = { git = "https://github.com/okx/reth", rev = "3ba1e5d3820fff48ade7962769cb367ac183ba92" }
 reth-tracing = { git = "https://github.com/okx/reth", rev = "3ba1e5d3820fff48ade7962769cb367ac183ba92" }

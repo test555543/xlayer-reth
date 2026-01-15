@@ -4,7 +4,7 @@ use crate::pubsub::{
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader as _, Transaction as _, TxReceipt as _};
 use alloy_json_rpc::RpcObject;
-use alloy_primitives::{Address, TxHash};
+use alloy_primitives::{Address, TxHash, U256};
 use alloy_rpc_types_eth::{Header, TransactionInfo};
 use futures::StreamExt;
 use jsonrpsee::{
@@ -20,6 +20,7 @@ use reth_primitives_traits::{
 use reth_rpc::eth::pubsub::EthPubSub;
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert};
 use reth_rpc_eth_api::{EthApiTypes, RpcNodeCore, RpcReceipt, RpcTransaction};
+use reth_rpc_eth_types::utils::calculate_gas_used_and_next_log_index;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_storage_api::BlockNumReader;
 use reth_tasks::TaskSpawner;
@@ -163,7 +164,16 @@ where
         kind: FlashblockSubscriptionKind,
         params: Option<FlashblockParams>,
     ) -> jsonrpsee::core::SubscriptionResult {
-        if let Some(params) = &params {
+        if kind == FlashblockSubscriptionKind::Flashblocks {
+            let Some(params) = &params else {
+                pending
+                    .reject(invalid_params_rpc_err(
+                        "flashblocks subscription requires filter params, no params specified",
+                    ))
+                    .await;
+                return Ok(());
+            };
+
             if let Err(err) = params.validate(self.inner.max_subscribed_addresses) {
                 pending.reject(err).await;
                 return Ok(());
@@ -274,20 +284,27 @@ where
             .transactions_with_sender()
             .enumerate()
             .filter_map(|(idx, (sender, tx))| {
+                let tx_hash = *tx.tx_hash();
+                if txhash_cache.get(&tx_hash).is_some() {
+                    return None;
+                }
+                let Some(receipt) = receipts.get(idx) else {
+                    warn!(target: "xlayer::flashblocks", "failed to collect transaction idx: {idx}, missing receipt");
+                    return None;
+                };
+
                 if filter.requires_address_filtering() {
                     let matches_filter = Self::is_address_in_transaction(
                         *sender,
                         tx,
-                        receipts.get(idx),
+                        Some(receipt),
                         &filter.sub_tx_filter.subscribe_addresses,
                     );
                     if !matches_filter {
                         return None;
                     }
                 }
-
-                let receipt = receipts.get(idx)?;
-                let tx_hash = *tx.tx_hash();
+                txhash_cache.insert(tx_hash, ());
 
                 let ctx = EnrichmentContext {
                     tx,
@@ -297,12 +314,6 @@ where
                     sealed_block,
                     tx_converter,
                 };
-
-                if txhash_cache.get(&tx_hash).is_some() {
-                    return None;
-                }
-
-                txhash_cache.insert(tx_hash, ());
 
                 let tx_data = Self::enrich_transaction_data(filter, &ctx);
                 let tx_receipt = Self::enrich_receipt(filter, receipt, receipts, &ctx);
@@ -321,8 +332,7 @@ where
             return None;
         }
 
-        let recovered =
-            reth_primitives_traits::Recovered::new_unchecked(ctx.tx.clone(), ctx.sender);
+        let recovered = Recovered::new_unchecked(ctx.tx.clone(), ctx.sender);
 
         let rpc_tx = ctx
             .tx_converter
@@ -352,14 +362,13 @@ where
             return None;
         }
 
-        let gas_used = receipt.cumulative_gas_used();
-
-        let next_log_index = receipts.iter().take(ctx.idx).map(|r| r.logs().len()).sum::<usize>();
+        let (gas_used, next_log_index) =
+            calculate_gas_used_and_next_log_index(ctx.idx as u64, receipts);
 
         let receipt_input = ConvertReceiptInput {
             receipt: receipt.clone(),
             tx: Recovered::new_unchecked(ctx.tx, ctx.sender),
-            gas_used,
+            gas_used: receipt.cumulative_gas_used() - gas_used,
             next_log_index,
             meta: TransactionMeta {
                 tx_hash: ctx.tx_hash,
@@ -372,12 +381,11 @@ where
             },
         };
 
-        let rpc_receipts = ctx
-            .tx_converter
+        ctx.tx_converter
             .convert_receipts_with_block(vec![receipt_input], ctx.sealed_block)
-            .ok()?;
-
-        rpc_receipts.first().cloned()
+            .ok()?
+            .into_iter()
+            .next()
     }
 
     fn is_address_in_transaction(
@@ -452,12 +460,9 @@ where
                 break Ok(())
             },
             maybe_fb_item = fb_stream.next() => {
-                let item = match maybe_fb_item {
-                    Some(item) => item,
-                    None => {
-                        // stream ended
-                        break Ok(())
-                    },
+                let Some(item) = maybe_fb_item else {
+                    // stream ended
+                    break Ok(());
                 };
 
                 let msg = SubscriptionMessage::new(
@@ -479,7 +484,9 @@ fn extract_header_from_pending_block<N: NodePrimitives>(
     pending_block: &PendingFlashBlock<N>,
 ) -> Result<Header<N::BlockHeader>, ErrorObject<'static>> {
     let block = pending_block.block();
-    let sealed_header = block.clone_sealed_header();
-
-    Ok(Header::from_consensus(sealed_header.into(), None, None))
+    Ok(Header::from_consensus(
+        block.clone_sealed_header().into(),
+        None,
+        Some(U256::from(block.rlp_length())),
+    ))
 }
