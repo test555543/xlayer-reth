@@ -8,6 +8,7 @@ use clap::Parser;
 use payload::XLayerPayloadServiceBuilder;
 use std::sync::Arc;
 use tracing::info;
+use xlayer_full_trace::{EngineApiTracer, RpcTracerLayer, Tracer};
 
 use op_rbuilder::args::OpRbuilderArgs;
 use reth::{
@@ -70,17 +71,33 @@ fn main() {
             let genesis_block = builder.config().chain.genesis().number.unwrap_or_default();
             info!("XLayer genesis block = {}", genesis_block);
 
+            // Clone xlayer_args early to avoid partial move issues
+            let xlayer_args = args.xlayer_args.clone();
+
             let legacy_config = LegacyRpcRouterConfig {
-                enabled: args.xlayer_args.legacy.legacy_rpc_url.is_some(),
-                legacy_endpoint: args.xlayer_args.legacy.legacy_rpc_url.unwrap_or_default(),
+                enabled: xlayer_args.legacy.legacy_rpc_url.is_some(),
+                legacy_endpoint: xlayer_args.legacy.legacy_rpc_url.unwrap_or_default(),
                 cutoff_block: genesis_block,
-                timeout: args.xlayer_args.legacy.legacy_rpc_timeout,
+                timeout: xlayer_args.legacy.legacy_rpc_timeout,
             };
 
-            // Build add-ons with RPC middleware
-            // If not enabled, the layer will not do any re-routing.
-            let add_ons =
-                op_node.add_ons().with_rpc_middleware(LegacyRpcRouterLayer::new(legacy_config));
+            // Build add-ons with RPC middleware and custom Engine API
+            // EngineApiTracer now directly implements EngineApiBuilder
+            //
+            // Tracer is a simple struct with only Args generic, making it easy to share.
+            // It returns Arc<Tracer<Args>> directly from new().
+            let tracer = Tracer::new(xlayer_args.full_trace);
+
+            // Create EngineApiTracer directly - it implements EngineApiBuilder
+            let engine_tracer = EngineApiTracer::new(tracer.clone());
+
+            let add_ons = op_node
+                .add_ons()
+                .with_rpc_middleware((
+                    RpcTracerLayer::new(tracer.clone()),      // Execute first
+                    LegacyRpcRouterLayer::new(legacy_config), // Execute second
+                ))
+                .with_engine_api(engine_tracer);
 
             // Create the XLayer payload service builder
             // It handles both flashblocks and default modes internally
@@ -97,6 +114,9 @@ fn main() {
                 .extend_rpc_modules(move |ctx| {
                     let new_op_eth_api = Arc::new(ctx.registry.eth_api().clone());
 
+                    // Initialize blockchain tracer to monitor canonical state changes
+                    tracer.initialize_blockchain_tracer(ctx.node());
+
                     // Initialize flashblocks RPC service if not in flashblocks sequencer mode
                     if !args.node_args.flashblocks.enabled {
                         if let Some(flashblock_rx) = new_op_eth_api.subscribe_received_flashblocks()
@@ -110,7 +130,7 @@ fn main() {
                             info!(target: "reth::cli", "xlayer flashblocks service initialized");
                         }
 
-                        if args.xlayer_args.enable_flashblocks_subscription
+                        if xlayer_args.enable_flashblocks_subscription
                             && let Some(pending_blocks_rx) = new_op_eth_api.pending_block_rx()
                         {
                             let eth_pubsub = ctx.registry.eth_handlers().pubsub.clone();
@@ -120,7 +140,7 @@ fn main() {
                                 pending_blocks_rx,
                                 Box::new(ctx.node().task_executor().clone()),
                                 new_op_eth_api.converter().clone(),
-                                args.xlayer_args.flashblocks_subscription_max_addresses,
+                                xlayer_args.flashblocks_subscription_max_addresses,
                             );
                             ctx.modules.add_or_replace_if_module_configured(
                                 RethRpcModule::Eth,
