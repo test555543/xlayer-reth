@@ -1,0 +1,834 @@
+name: X Layer Scheduled CI
+
+run-name: ${{ github.event.inputs.pr_sha != '' && format('PR CI - {0}', github.event.inputs.pr_sha) || 'Scheduled CI' }}
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:      # Allow manual trigger
+    inputs:
+      triggered_by:
+        description: 'What triggered this workflow'
+        required: false
+        default: 'manual'
+      upstream_sha:
+        description: 'Upstream commit SHA (if triggered by poll)'
+        required: false
+        default: ''
+      pr_numbers:
+        description: 'PR numbers that triggered this (if triggered by PR comment)'
+        required: false
+        default: ''
+      pr_branch:
+        description: 'PR branch name (if triggered by PR comment)'
+        required: false
+        default: ''
+      pr_repo:
+        description: 'PR repository (owner/name, if triggered by PR comment)'
+        required: false
+        default: ''
+      pr_sha:
+        description: 'PR commit SHA (if triggered by PR comment)'
+        required: false
+        default: ''
+
+# Ensure only one workflow runs at a time
+# For PR triggers, use PR commit SHA to prevent re-running same commit
+# For scheduled/auto triggers, use branch name
+concurrency:
+  group: ${{ github.event.inputs.pr_sha != '' && format('pr-ci-{0}', github.event.inputs.pr_sha) || format('scheduler-xlayer-{0}', github.ref) }}
+  cancel-in-progress: false  # Don't cancel, let it queue or skip (GitHub will handle duplicates)
+
+env:
+  CARGO_TERM_COLOR: always
+  SEED: rustethereumethereumrust
+  RUST_BACKTRACE: 1
+
+jobs:
+  ##############################################################################
+  # Phase 0: Sync from Upstream
+  ##############################################################################
+
+  sync-upstream:
+    name: Sync from upstream (okx/reth)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      xlayer_reth_commit: ${{ steps.get_commit.outputs.commit_short }}
+    permissions:
+      contents: write  # Required for pushing merged changes
+      pull-requests: none
+      issues: none
+      packages: none
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
+      - name: Log trigger source
+        run: |
+          echo "## 🔔 Workflow Trigger Information" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** ${{ inputs.triggered_by || 'scheduled' }}" >> $GITHUB_STEP_SUMMARY
+          if [[ -n "${{ inputs.upstream_sha }}" ]]; then
+            echo "**Upstream SHA:** ${{ inputs.upstream_sha }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [[ -n "${{ inputs.pr_numbers }}" ]]; then
+            echo "**PR Numbers:** ${{ inputs.pr_numbers }}" >> $GITHUB_STEP_SUMMARY
+            echo "**PR Branch:** ${{ inputs.pr_branch }}" >> $GITHUB_STEP_SUMMARY
+            echo "**PR Repository:** ${{ inputs.pr_repo }}" >> $GITHUB_STEP_SUMMARY
+            echo "**PR Links:** https://github.com/okx/xlayer-reth/pulls?q=is:pr+$(echo '${{ inputs.pr_numbers }}' | tr ' ' '+')" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+      - name: Checkout current branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/okx/xlayer-reth.git || true
+          git remote -v
+
+      - name: Fetch and setup branch
+        id: merge
+        continue-on-error: true
+        run: |
+          echo "Current branch: $(git branch --show-current)"
+
+          # Check if triggered by PR comment
+          if [[ -n "${{ inputs.pr_branch }}" && -n "${{ inputs.pr_repo }}" ]]; then
+            echo "🔀 Triggered by PR - fetching PR branch..."
+            echo "PR Repository: ${{ inputs.pr_repo }}"
+            echo "PR Branch: ${{ inputs.pr_branch }}"
+
+            # Add PR repo as remote (handle forks)
+            PR_REPO_URL="https://github.com/${{ inputs.pr_repo }}.git"
+            git remote add pr-source "$PR_REPO_URL" || true
+            git fetch pr-source "${{ inputs.pr_branch }}"
+
+            # Checkout the PR branch content into current branch
+            echo "Checking out PR branch content..."
+            if git checkout pr-source/${{ inputs.pr_branch }} .; then
+              echo "✅ Successfully checked out PR branch"
+              echo "merge_status=success" >> $GITHUB_OUTPUT
+              echo "source=pr-branch" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Failed to checkout PR branch"
+              echo "merge_status=conflict" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+          else
+            echo "📅 Scheduled/manual trigger - syncing from upstream dev..."
+            git fetch upstream dev
+
+            echo "Attempting to merge upstream/dev..."
+            if git merge --no-edit upstream/dev; then
+              echo "✅ Merge successful"
+              echo "merge_status=success" >> $GITHUB_OUTPUT
+              echo "source=upstream-dev" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Merge conflict detected"
+              echo "merge_status=conflict" >> $GITHUB_OUTPUT
+              git merge --abort
+              exit 1
+            fi
+          fi
+
+      - name: Capture xlayer-reth commit
+        id: get_commit
+        if: steps.merge.outputs.merge_status == 'success'
+        run: |
+          # Get latest commit before merge commit. 
+          COMMIT=$(git rev-parse $(git log --merges -1 --pretty=format:"%H")^2)
+          COMMIT_SHORT="${COMMIT:0:8}"
+          echo "commit_short=$COMMIT_SHORT" >> $GITHUB_OUTPUT
+          echo "Captured xlayer-reth commit: $COMMIT_SHORT"
+
+      - name: Push merged changes
+        if: steps.merge.outputs.merge_status == 'success' && steps.merge.outputs.source == 'upstream-dev'
+        run: |
+          echo "Pushing changes to origin..."
+          git push origin HEAD:${{ github.ref_name }}
+
+      - name: Skip push for PR branch
+        if: steps.merge.outputs.merge_status == 'success' && steps.merge.outputs.source == 'pr-branch'
+        run: |
+          echo "⏭️ Skipping push - testing PR branch only (not merging to dev)"
+
+      - name: Generate sync summary
+        if: always()
+        run: |
+          echo "## 🔄 Sync Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ steps.merge.outputs.source }}" == "pr-branch" ]]; then
+            echo "**Source:** PR Branch (Testing only - not merged to dev)" >> $GITHUB_STEP_SUMMARY
+            echo "**PR Repository:** ${{ inputs.pr_repo }}" >> $GITHUB_STEP_SUMMARY
+            echo "**PR Branch:** ${{ inputs.pr_branch }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Source:** https://github.com/okx/xlayer-reth (dev branch)" >> $GITHUB_STEP_SUMMARY
+            echo "**Target Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ steps.merge.outputs.merge_status }}" == "success" ]]; then
+            if [[ "${{ steps.merge.outputs.source }}" == "pr-branch" ]]; then
+              echo "✅ **Successfully checked out PR branch for testing**" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "✅ **Successfully synced from upstream**" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            # Show recent commits from the appropriate source
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Recent Changes" >> $GITHUB_STEP_SUMMARY
+            if [[ "${{ steps.merge.outputs.source }}" == "pr-branch" ]]; then
+              # Show commits from PR branch
+              git log pr-source/${{ inputs.pr_branch }} --oneline --graph --decorate -10 >> $GITHUB_STEP_SUMMARY
+            else
+              # Show commits from upstream/dev
+              git log upstream/dev --oneline --graph --decorate -10 >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "❌ **Sync failed**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            if [[ "${{ steps.merge.outputs.source }}" == "pr-branch" ]]; then
+              echo "⚠️ Failed to checkout PR branch" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "⚠️ Merge conflict detected - Please resolve conflicts manually:" >> $GITHUB_STEP_SUMMARY
+              echo "1. Clone the repository" >> $GITHUB_STEP_SUMMARY
+              echo "2. Run: \`git remote add upstream https://github.com/okx/xlayer-reth.git\`" >> $GITHUB_STEP_SUMMARY
+              echo "3. Run: \`git fetch upstream\`" >> $GITHUB_STEP_SUMMARY
+              echo "4. Run: \`git merge upstream/dev\`" >> $GITHUB_STEP_SUMMARY
+              echo "5. Resolve conflicts and push" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+      - name: Fail workflow if merge conflict
+        if: steps.merge.outputs.merge_status != 'success'
+        run: |
+          echo "::error::Merge conflict detected. Please resolve manually."
+          exit 1
+
+  ##############################################################################
+  # Phase 1: Check Suite
+  ##############################################################################
+
+  basic-checks:
+    needs: [sync-upstream]
+    name: Basic Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      sweep_check: ${{ steps.sweep_check.outcome }}
+      format_check: ${{ steps.format_check.outcome }}
+      clippy_check: ${{ steps.clippy_check.outcome }}
+      test: ${{ steps.test.outcome }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Setup code for testing
+        run: |
+          # Check if triggered by PR comment
+          if [[ -n "${{ inputs.pr_branch }}" && -n "${{ inputs.pr_repo }}" ]]; then
+            echo "🔀 Testing PR branch..."
+            echo "PR Repository: ${{ inputs.pr_repo }}"
+            echo "PR Branch: ${{ inputs.pr_branch }}"
+
+            # Add PR repo as remote and fetch the branch
+            PR_REPO_URL="https://github.com/${{ inputs.pr_repo }}.git"
+            git remote add pr-source "$PR_REPO_URL" || true
+            git fetch pr-source "${{ inputs.pr_branch }}"
+
+            # Checkout the PR branch content
+            git checkout pr-source/${{ inputs.pr_branch }} .
+            echo "✅ PR branch checked out for testing"
+          else
+            echo "📅 Scheduled/auto trigger - pulling from dev..."
+            git pull origin ${{ github.ref_name }}
+            echo "✅ Latest changes pulled from dev"
+          fi
+
+      - name: Free up disk space
+        run: |
+          echo "Disk space before cleanup:"
+          df -h
+
+          # Remove unnecessary pre-installed software to free up space
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+
+          echo ""
+          echo "Disk space after cleanup:"
+          df -h
+
+      - name: Get Rust version from Cargo.toml
+        id: rust-version
+        run: |
+          RUST_VERSION=$(grep '^rust-version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          echo "Rust version from Cargo.toml: $RUST_VERSION"
+          echo "version=$RUST_VERSION" >> $GITHUB_OUTPUT
+
+      - uses: extractions/setup-just@v3
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust-version.outputs.version }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: false
+
+      - name: Run sweep-check
+        id: sweep_check
+        continue-on-error: true
+        run: |
+          # Upstream flashblocks inner dependency reth-optimism-primitives does not
+          # specify feats reth-codec and serde-bincode-compat. So we skip.
+          just sweep-check xlayer-innertx
+
+      - name: Run format check
+        id: format_check
+        continue-on-error: true
+        run: |
+          just check-format
+
+      - name: Run clippy
+        id: clippy_check
+        continue-on-error: true
+        run: |
+          just check-clippy
+
+      - name: Run tests
+        id: test
+        continue-on-error: true
+        run: |
+          just test
+
+      - name: Generate test summary
+        if: always()
+        run: |
+          echo "## 🧪 Basic Checks" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Function to get status icon
+          get_icon() {
+            if [[ "$1" == "success" ]]; then
+              echo "✅"
+            else
+              echo "❌"
+            fi
+          }
+
+          SWEEP_ICON=$(get_icon "${{ steps.sweep_check.outcome }}")
+          FORMAT_ICON=$(get_icon "${{ steps.format_check.outcome }}")
+          CLIPPY_ICON=$(get_icon "${{ steps.clippy_check.outcome }}")
+          TEST_ICON=$(get_icon "${{ steps.test.outcome }}")
+
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Sweep Check | ${SWEEP_ICON} ${{ steps.sweep_check.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Format Check | ${FORMAT_ICON} ${{ steps.format_check.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Clippy | ${CLIPPY_ICON} ${{ steps.clippy_check.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ${TEST_ICON} ${{ steps.test.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Overall status
+          if [[ "${{ steps.sweep_check.outcome }}" == "success" ]] && \
+             [[ "${{ steps.format_check.outcome }}" == "success" ]] && \
+             [[ "${{ steps.clippy_check.outcome }}" == "success" ]] && \
+             [[ "${{ steps.test.outcome }}" == "success" ]]; then
+            echo "✅ **All checks passed**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Some checks failed**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail workflow if checks failed
+        if: steps.sweep_check.outcome != 'success' || steps.format_check.outcome != 'success' || steps.clippy_check.outcome != 'success' || steps.test.outcome != 'success'
+        run: |
+          echo "::error::Some checks failed. Please review the errors above."
+          exit 1
+
+  ##############################################################################
+  # Phase 2: Check unused dependencies 
+  ##############################################################################
+
+  udeps:
+    needs: [sync-upstream]
+    name: Unused Dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2.13.2
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Setup code for testing
+        run: |
+          # Check if triggered by PR comment
+          if [[ -n "${{ inputs.pr_branch }}" && -n "${{ inputs.pr_repo }}" ]]; then
+            echo "🔀 Testing PR branch..."
+            echo "PR Repository: ${{ inputs.pr_repo }}"
+            echo "PR Branch: ${{ inputs.pr_branch }}"
+
+            # Add PR repo as remote and fetch the branch
+            PR_REPO_URL="https://github.com/${{ inputs.pr_repo }}.git"
+            git remote add pr-source "$PR_REPO_URL" || true
+            git fetch pr-source "${{ inputs.pr_branch }}"
+
+            # Checkout the PR branch content
+            git checkout pr-source/${{ inputs.pr_branch }} .
+            echo "✅ PR branch checked out for testing"
+          else
+            echo "📅 Scheduled/auto trigger - pulling from dev..."
+            git pull origin ${{ github.ref_name }}
+            echo "✅ Latest changes pulled from dev"
+          fi
+
+      - name: Free up disk space
+        run: |
+          echo "Disk space before cleanup:"
+          df -h
+
+          # Remove unnecessary pre-installed software to free up space
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+
+          echo ""
+          echo "Disk space after cleanup:"
+          df -h
+
+      - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
+      - uses: dtolnay/rust-toolchain@0c3131df9e5407c0c36352032d04af846dbe0fb7 # nightly
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        with:
+          cache-on-failure: false
+          add-rust-environment-hash-key: "false"
+          key: nightly-${{ hashFiles('Cargo.lock') }}
+      - uses: taiki-e/install-action@3575e532701a5fc614b0c842e4119af4cc5fd16d # v2.62.60
+        with:
+          tool: cargo-udeps
+
+      - name: Run cargo udeps
+        id: run_udeps
+        continue-on-error: true
+        run: |
+          set +e
+          cargo +nightly udeps --workspace --all-features --all-targets 2>&1 | tee udeps_output.txt
+          exit_code=${PIPESTATUS[0]}
+          exit $exit_code
+
+      - name: Generate test summary
+        if: always()
+        run: |
+          echo "## 🔍 Unused Dependencies Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.run_udeps.outcome }}" == "success" ]; then
+            echo "✅ **No unused dependencies found**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Unused dependencies detected**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            if [ -f udeps_output.txt ]; then
+              # Extract only the unused dependencies section (skip build/loading info)
+              # Start from "unused dependencies:" line and continue to the end
+              if grep -q "unused dependencies:" udeps_output.txt; then
+                echo '```' >> $GITHUB_STEP_SUMMARY
+                # Use awk to extract from "unused dependencies:" to end, skipping empty leading lines
+                awk '/unused dependencies:/{found=1} found' udeps_output.txt | \
+                  grep -v "Checking\|Loading depinfo\|Finished\|info:" >> $GITHUB_STEP_SUMMARY
+                echo '```' >> $GITHUB_STEP_SUMMARY
+              else
+                echo "⚠️ Could not parse unused dependencies output" >> $GITHUB_STEP_SUMMARY
+              fi
+            fi
+          fi
+
+      - name: Fail workflow if udeps failed
+        if: steps.run_udeps.outcome != 'success'
+        run: |
+          echo "::error::Unused dependencies found. Please review the errors above."
+          exit 1
+
+  ##############################################################################
+  # Phase 3: Notification
+  ##############################################################################
+
+  notify:
+    name: Send Lark Notification
+    runs-on: ubuntu-latest
+    needs: [sync-upstream, basic-checks, udeps]
+    if: always() && !cancelled()
+    timeout-minutes: 10
+    permissions:
+      contents: none
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
+      - name: Determine Status and Send Notification
+        env:
+          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
+        run: |
+          # Check if workflow was cancelled
+          if [[ "${{ needs.sync-upstream.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.basic-checks.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.udeps.result }}" == "cancelled" ]]; then
+            echo "⏭️ Workflow was cancelled - skipping Lark notification"
+            exit 0
+          fi
+
+          # Determine overall status and color based on actual test results
+          if [[ "${{ needs.sync-upstream.result }}" == "success" ]] && \
+             [[ "${{ needs.basic-checks.result }}" == "success" ]] && \
+             [[ "${{ needs.udeps.result }}" == "success" ]]; then
+            CARD_COLOR="green"
+            STATUS_TEXT="✅ All Tasks Passed"
+            STATUS_EMOJI="✅"
+          else
+            CARD_COLOR="red"
+            STATUS_TEXT="❌ Some Tasks Failed"
+            STATUS_EMOJI="❌"
+          fi
+
+          # Get current time in Beijing timezone
+          CURRENT_TIME=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')
+
+          # Use the xlayer-reth commit captured from sync-upstream job
+          COMMIT_SHORT="${{ needs.sync-upstream.outputs.xlayer_reth_commit }}"
+
+          # Determine if triggered by PR and set branch info accordingly
+          if [[ "${{ github.event.inputs.triggered_by }}" == "pr-comment" ]]; then
+            BRANCH_INFO="PR ${{ github.event.inputs.pr_numbers }} (${{ github.event.inputs.pr_branch }})"
+            TRIGGER_TYPE="🔔 PR Comment Trigger"
+          else
+            BRANCH_INFO="${{ github.ref_name }}"
+            TRIGGER_TYPE="⏰ Scheduled / Auto Trigger"
+          fi
+
+          # Build status for each check
+          get_status_icon() {
+            if [[ "$1" == "success" ]]; then
+              echo "✅"
+            else
+              echo "❌"
+            fi
+          }
+
+          SYNC_ICON=$(get_status_icon "${{ needs.sync-upstream.result }}")
+          SWEEP_ICON=$(get_status_icon "${{ needs.basic-checks.outputs.sweep_check }}")
+          FORMAT_ICON=$(get_status_icon "${{ needs.basic-checks.outputs.format_check }}")
+          CLIPPY_ICON=$(get_status_icon "${{ needs.basic-checks.outputs.clippy_check }}")
+          TEST_ICON=$(get_status_icon "${{ needs.basic-checks.outputs.test }}")
+          UDEPS_ICON=$(get_status_icon "${{ needs.udeps.result }}")
+
+          # Build Lark Card JSON
+          cat > lark_card.json <<EOF
+          {
+            "msg_type": "interactive",
+            "card": {
+              "header": {
+                "title": {
+                  "tag": "plain_text",
+                  "content": "${STATUS_EMOJI} X-Layer Reth (new framework) Scheduled CI Report"
+                },
+                "template": "${CARD_COLOR}"
+              },
+              "elements": [
+                {
+                  "tag": "div",
+                  "fields": [
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "**📅 Run Time**\\n${CURRENT_TIME}"
+                      }
+                    },
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "**🔀 Branch/PR**\\n${BRANCH_INFO}"
+                      }
+                    },
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "**📝 Commit**\\n${COMMIT_SHORT}"
+                      }
+                    },
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "**🔔 Trigger**\\n${TRIGGER_TYPE}"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "tag": "hr"
+                },
+                {
+                  "tag": "div",
+                  "text": {
+                    "tag": "lark_md",
+                    "content": "**🧪 Test Status**"
+                  }
+                },
+                {
+                  "tag": "div",
+                  "fields": [
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "${SYNC_ICON} Upstream Sync"
+                      }
+                    },
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "${SWEEP_ICON} Sweep Check"
+                      }
+                    },
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "${FORMAT_ICON} Format Check"
+                      }
+                    },
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "${CLIPPY_ICON} Clippy"
+                      }
+                    },
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "${TEST_ICON} Tests"
+                      }
+                    },
+                    {
+                      "is_short": true,
+                      "text": {
+                        "tag": "lark_md",
+                        "content": "${UDEPS_ICON} Unused Dependencies"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "tag": "hr"
+                },
+                {
+                  "tag": "div",
+                  "text": {
+                    "tag": "lark_md",
+                    "content": "**${STATUS_TEXT}**"
+                  }
+                },
+                {
+                  "tag": "action",
+                  "actions": [
+                    {
+                      "tag": "button",
+                      "text": {
+                        "tag": "plain_text",
+                        "content": "View Detailed Logs"
+                      },
+                      "type": "primary",
+                      "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+          EOF
+
+          # Send to Lark/Feishu
+          if [ -n "$LARK_WEBHOOK_URL" ]; then
+            echo "Sending card notification to Lark..."
+
+            # Send request and capture response (webhook URL never logged)
+            response=$(curl -s -w "\n%{http_code}" -X POST "$LARK_WEBHOOK_URL" \
+              -H 'Content-Type: application/json' \
+              -d @lark_card.json)
+
+            http_code=$(echo "$response" | tail -n1)
+            response_body=$(echo "$response" | head -n-1)
+
+            if [ "$http_code" -eq 200 ]; then
+              echo "✅ Lark notification sent successfully"
+              # Only log sanitized response (no sensitive data)
+              echo "$response_body" | jq -r '.msg // "OK"' || echo "Notification delivered"
+            else
+              echo "❌ Failed to send Lark notification"
+              echo "HTTP Status Code: $http_code"
+              # Log sanitized error only (no webhook URL exposure)
+              echo "$response_body" | jq -r '.msg // .error // "Unknown error"' || echo "Check webhook configuration"
+            fi
+          else
+            echo "⚠️ LARK_WEBHOOK_URL not configured. Skipping notification."
+            echo ""
+            echo "To enable Lark notifications:"
+            echo "1. Go to GitHub repository Settings → Secrets → Actions"
+            echo "2. Add a new secret named 'LARK_WEBHOOK_URL'"
+            echo "3. Paste your Lark webhook URL as the value"
+            echo ""
+            echo "Generated card preview:"
+            cat lark_card.json | jq '.'
+          fi
+
+
+  ##############################################################################
+  # Phase 4: Post PR Comment (if triggered by PR)
+  ##############################################################################
+
+  post-pr-comment:
+    name: Post CI Report to PR
+    runs-on: ubuntu-latest
+    needs: [sync-upstream, basic-checks, udeps]
+    if: always() && github.event.inputs.triggered_by == 'pr-comment' && github.event.inputs.pr_numbers != ''
+    timeout-minutes: 10
+    permissions:
+      contents: none
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
+      - name: Generate CI report and post to PR
+        env:
+          GH_TOKEN: ${{ secrets.UPSTREAM_REPO_PAT }}
+          UPSTREAM_REPO: okx/xlayer-reth
+        run: |
+          # Extract PR number (remove # prefix)
+          PR_NUMBER=$(echo "${{ github.event.inputs.pr_numbers }}" | sed 's/#//' | awk '{print $1}')
+
+          echo "Posting CI report to PR #$PR_NUMBER in $UPSTREAM_REPO"
+
+          # Determine overall status
+          if [[ "${{ needs.sync-upstream.result }}" == "success" ]] && \
+             [[ "${{ needs.basic-checks.result }}" == "success" ]] && \
+             [[ "${{ needs.udeps.result }}" == "success" ]]; then
+            OVERALL_STATUS="✅ All Checks Passed"
+            STATUS_ICON="✅"
+          else
+            OVERALL_STATUS="❌ Some Checks Failed"
+            STATUS_ICON="❌"
+          fi
+
+          # Get status icons for each check
+          get_status_icon() {
+            if [[ "$1" == "success" ]]; then
+              echo "✅"
+            else
+              echo "❌"
+            fi
+          }
+
+          SYNC_ICON=$(get_status_icon "${{ needs.sync-upstream.result }}")
+          CHECKS_ICON=$(get_status_icon "${{ needs.basic-checks.result }}")
+          UDEPS_ICON=$(get_status_icon "${{ needs.udeps.result }}")
+
+          # Build comment body
+          cat > comment.md <<EOF
+          ## ${STATUS_ICON} CI Report
+
+          **Overall Status:** ${OVERALL_STATUS}
+
+          ### Test Results
+
+          | Check | Status |
+          |-------|--------|
+          | Upstream Sync | ${SYNC_ICON} ${{ needs.sync-upstream.result }} |
+          | Basic Checks | ${CHECKS_ICON} ${{ needs.basic-checks.result }} |
+          | Unused Dependencies | ${UDEPS_ICON} ${{ needs.udeps.result }} |
+
+          ### Details
+
+          - **Triggered by:** \`/trigger\` command
+          - **PR Branch:** \`${{ github.event.inputs.pr_branch }}\`
+          - **PR Repository:** ${{ github.event.inputs.pr_repo }}
+          - **Run ID:** ${{ github.run_id }}
+          - **Commit:** ${{ github.sha }}
+
+          [View Full CI Logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+          ---
+          <sub>🤖 Automated CI report from [xlayer-reth-ci](https://github.com/${{ github.repository }})</sub>
+          EOF
+
+          # Post comment to PR
+          if [ -n "$GH_TOKEN" ]; then
+            echo "Posting comment to PR..."
+            gh pr comment "$PR_NUMBER" \
+              --repo "$UPSTREAM_REPO" \
+              --body-file comment.md
+
+            if [ $? -eq 0 ]; then
+              echo "✅ Successfully posted CI report to PR #$PR_NUMBER"
+            else
+              echo "❌ Failed to post comment to PR"
+              exit 1
+            fi
+          else
+            echo "⚠️ UPSTREAM_REPO_PAT secret not configured. Cannot post comment."
+            echo ""
+            echo "To enable PR comments:"
+            echo "1. Create a Personal Access Token (PAT) with 'repo' scope"
+            echo "2. Go to GitHub repository Settings → Secrets → Actions"
+            echo "3. Add a new secret named 'UPSTREAM_REPO_PAT'"
+            echo "4. Paste your PAT as the value"
+            echo ""
+            echo "Comment preview:"
+            cat comment.md
+          fi
