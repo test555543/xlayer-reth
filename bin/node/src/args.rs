@@ -31,6 +31,13 @@ pub struct XLayerArgs {
         default_value = "1000"
     )]
     pub flashblocks_subscription_max_addresses: usize,
+    
+    #[arg(
+        long = "xlayer.sequencer-mode",
+        help = "Enable sequencer mode for the node (default: false, i.e., RPC mode). This flag can be used by various business logic components to determine node behavior.",
+        default_value = "false"
+    )]
+    pub sequencer_mode: bool,
 }
 
 impl XLayerArgs {
@@ -287,6 +294,7 @@ mod tests {
             monitor: FullLinkMonitorArgs::default(),
             enable_flashblocks_subscription: false,
             flashblocks_subscription_max_addresses: 1000,
+            sequencer_mode: false,
         };
 
         let result = args.validate();
