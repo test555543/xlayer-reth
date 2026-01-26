@@ -239,7 +239,7 @@ where
     let cutoff_block = config.cutoff_block;
     if let Some(block_param) = block_param {
         let service = LegacyRpcRouterService { inner: inner.clone(), config, client };
-        if can_use_block_hash_as_param(method) && crate::is_block_hash(&block_param) {
+        if can_use_block_hash_as_param(method) && crate::is_valid_32_bytes_string(&block_param) {
             let res = service.call_eth_get_block_by_hash(&block_param, false).await;
             match res {
                 Ok(n) => {
