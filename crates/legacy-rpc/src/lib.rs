@@ -458,6 +458,9 @@ mod tests {
         // 7. Unicode characters
         let with_unicode = "0x1234567890abcdef1234567890abcdef12345→7890abcdef1234567890abcdef";
         assert!(!is_valid_32_bytes_string(with_unicode));
+    }
+
+    #[tokio::test]
     async fn test_call_eth_get_block_by_hash_success() {
         let response = r#"{
             "jsonrpc": "2.0",
@@ -530,4 +533,3 @@ mod tests {
         assert!(result.unwrap().is_none());
     }
 }
-
