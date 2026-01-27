@@ -67,6 +67,15 @@ fn main() {
                 std::process::exit(1);
             }
 
+            // Initialize global tracer if full link monitor is enabled
+            if args.xlayer_args.monitor.enable {
+                use std::path::PathBuf;
+                use xlayer_trace_monitor::init_global_tracer;
+                let output_path = PathBuf::from(&args.xlayer_args.monitor.output_path);
+                init_global_tracer(true, Some(output_path));
+                info!(target: "xlayer::monitor", "Global tracer initialized with output path: {}", args.xlayer_args.monitor.output_path);
+            }
+
             let op_node = OpNode::new(args.node_args.rollup_args.clone());
 
             let genesis_block = builder.config().chain.genesis().number.unwrap_or_default();
@@ -83,8 +92,11 @@ fn main() {
             };
 
             // For X Layer full link monitor
-            let monitor =
-                XLayerMonitor::new(xlayer_args.monitor, args.node_args.flashblocks.enabled);
+            let monitor = XLayerMonitor::new(
+                xlayer_args.monitor,
+                args.node_args.flashblocks.enabled,
+                xlayer_args.sequencer_mode,
+            );
 
             let add_ons = op_node.add_ons().with_rpc_middleware((
                 RpcMonitorLayer::new(monitor.clone()),    // Execute first
