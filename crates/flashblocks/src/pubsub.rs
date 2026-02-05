@@ -58,10 +58,10 @@ pub enum FlashblockParams {
 impl FlashblockParams {
     /// Validates the flashblock params.
     pub fn validate(&self, max_subscribed_addresses: usize) -> Result<(), ErrorObject<'static>> {
-        if let FlashblockParams::FlashblocksFilter(filter) = self {
-            if filter.sub_tx_filter.subscribe_addresses.len() > max_subscribed_addresses {
-                return Err(invalid_params_rpc_err("too many subscribe addresses"));
-            }
+        if let FlashblockParams::FlashblocksFilter(filter) = self
+            && filter.sub_tx_filter.subscribe_addresses.len() > max_subscribed_addresses
+        {
+            return Err(invalid_params_rpc_err("too many subscribe addresses"));
         }
         Ok(())
     }
@@ -89,7 +89,10 @@ impl FlashblocksFilter {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields, default)]
 pub struct SubTxFilter {
-    /// Subscribed transactions involving these addresses.
+    /// Subscribe addresses match a transaction if any of these addresses appears in:
+    /// 1. the sender `from` address
+    /// 2. the recipient `to` address
+    /// 3. the addresses that emitted logs
     pub subscribe_addresses: HashSet<Address>,
 
     /// Flag to include full transaction information.
