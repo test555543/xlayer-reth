@@ -10,11 +10,11 @@ use crate::{
     args::{FlashblocksArgs, OpRbuilderArgs},
     tests::{
         count_txs_to, flashblocks_number_contract::FlashblocksNumber, BlockTransactionsExt,
-        BundleOpts, ChainDriver, LocalInstance, TransactionBuilderExt, FLASHBLOCKS_NUMBER_ADDRESS,
+        ChainDriver, LocalInstance, TransactionBuilderExt, FLASHBLOCKS_NUMBER_ADDRESS,
     },
 };
 
-#[rb_test(flashblocks, args = OpRbuilderArgs {
+#[rb_test(args = OpRbuilderArgs {
     chain_block_time: 1000,
     flashblocks: FlashblocksArgs {
         enabled: true,
@@ -50,9 +50,8 @@ async fn test_flashblocks_no_state_root_calculation(rbuilder: LocalInstance) -> 
     Ok(())
 }
 
-#[rb_test(flashblocks, args = OpRbuilderArgs {
+#[rb_test(args = OpRbuilderArgs {
     chain_block_time: 1000,
-    enable_revert_protection: true,
     flashblocks: FlashblocksArgs {
         flashblocks_number_contract_address: Some(FLASHBLOCKS_NUMBER_ADDRESS),
         ..Default::default()
@@ -65,12 +64,7 @@ async fn test_flashblocks_number_contract_builder_tx(rbuilder: LocalInstance) ->
     let provider = rbuilder.provider().await?;
 
     // Deploy flashblocks number contract which will be in flashblocks 1
-    let deploy_tx = driver
-        .create_transaction()
-        .deploy_flashblock_number_contract()
-        .with_bundle(BundleOpts::default())
-        .send()
-        .await?;
+    let deploy_tx = driver.create_transaction().deploy_flashblock_number_contract().send().await?;
 
     // Create valid transactions
     let user_transactions = create_flashblock_transactions(&driver, 2..5).await?;
@@ -108,7 +102,6 @@ async fn test_flashblocks_number_contract_builder_tx(rbuilder: LocalInstance) ->
         .create_transaction()
         .init_flashblock_number_contract(true)
         .with_to(FLASHBLOCKS_NUMBER_ADDRESS)
-        .with_bundle(BundleOpts::default())
         .send()
         .await?;
 
@@ -130,7 +123,7 @@ async fn test_flashblocks_number_contract_builder_tx(rbuilder: LocalInstance) ->
 
     // Other builder txs should call the contract
     // Verify builder txs
-    assert_eq!(count_txs_to(&txs, contract_address), 4, "Should have 4 contract builder txs");
+    assert_eq!(count_txs_to(txs, contract_address), 4, "Should have 4 contract builder txs");
 
     // Verify flashblock number incremented correctly
     let contract = FlashblocksNumber::new(contract_address, provider.clone());
@@ -152,7 +145,7 @@ async fn test_flashblocks_number_contract_builder_tx(rbuilder: LocalInstance) ->
             .diff
             .transactions
             .get(tx_index)
-            .expect(&format!("Flashblock {} should have tx at index {}", i, tx_index));
+            .unwrap_or_else(|| panic!("Flashblock {} should have tx at index {}", i, tx_index));
         let tx = OpTxEnvelope::decode_2718(&mut tx_bytes.as_ref())
             .expect("failed to decode transaction");
 
@@ -180,19 +173,14 @@ async fn create_flashblock_transactions(
 ) -> eyre::Result<Vec<TxHash>> {
     let mut txs = Vec::new();
     for _ in range {
-        let tx = driver
-            .create_transaction()
-            .random_valid_transfer()
-            .with_bundle(BundleOpts::default())
-            .send()
-            .await?;
+        let tx = driver.create_transaction().random_valid_transfer().send().await?;
         txs.push(*tx.tx_hash());
     }
     Ok(txs)
 }
 
 /// Smoke test for flashblocks with end buffer.
-#[rb_test(flashblocks, args = OpRbuilderArgs {
+#[rb_test(args = OpRbuilderArgs {
     chain_block_time: 1000,
     flashblocks: FlashblocksArgs {
         enabled: true,
@@ -225,7 +213,7 @@ async fn smoke_basic(rbuilder: LocalInstance) -> eyre::Result<()> {
 }
 
 /// Smoke test with send_offset_ms
-#[rb_test(flashblocks, args = OpRbuilderArgs {
+#[rb_test(args = OpRbuilderArgs {
     chain_block_time: 1000,
     flashblocks: FlashblocksArgs {
         enabled: true,
@@ -260,7 +248,7 @@ async fn smoke_with_offset(rbuilder: LocalInstance) -> eyre::Result<()> {
 
 /// Test significant FCU delay (700ms into 1000ms block)
 /// Should produce fewer flashblocks due to less remaining time
-#[rb_test(flashblocks, args = OpRbuilderArgs {
+#[rb_test(args = OpRbuilderArgs {
     chain_block_time: 1000,
     flashblocks: FlashblocksArgs {
         enabled: true,
@@ -303,7 +291,7 @@ async fn late_fcu_reduces_flashblocks(rbuilder: LocalInstance) -> eyre::Result<(
 /// With 1000ms block time, 200ms flashblock interval, and 50ms end buffer:
 /// - Available time = 1000 - lag - 50 = 950 - lag
 /// - Flashblocks per block = ceil((available_time) / 200) + 1 (base flashblock)
-#[rb_test(flashblocks, args = OpRbuilderArgs {
+#[rb_test(args = OpRbuilderArgs {
       chain_block_time: 1000,
       flashblocks: FlashblocksArgs {
           enabled: true,

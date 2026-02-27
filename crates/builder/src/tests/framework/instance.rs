@@ -1,16 +1,14 @@
 use crate::{
     args::OpRbuilderArgs,
-    builders::{BuilderConfig, FlashblocksBuilder, PayloadBuilder, StandardBuilder},
-    primitives::reth::engine_api_builder::OpEngineApiBuilder,
-    revert_protection::{EthApiExtServer, RevertProtectionExt},
+    payload::{BuilderConfig, FlashblocksBuilder, PayloadBuilder},
     tests::{
-        builder_signer, create_test_db, framework::driver::ChainDriver, get_available_port,
-        EngineApi, Ipc, TransactionPoolObserver, TEE_DEBUG_ADDRESS,
+        builder_signer, create_test_db,
+        framework::{driver::ChainDriver, engine_api_builder::OpEngineApiBuilder},
+        EngineApi, Ipc, TransactionPoolObserver,
     },
-    tx::FBPooledTransaction,
-    tx_signer::Signer,
+    tx::signer::Signer,
 };
-use alloy_primitives::{hex, keccak256, Address, Bytes, B256};
+use alloy_primitives::B256;
 use alloy_provider::{Identity, ProviderBuilder, RootProvider};
 use clap::Parser;
 use core::{
@@ -22,10 +20,6 @@ use core::{
     time::Duration,
 };
 use futures::{FutureExt, StreamExt};
-use http::{Request, Response, StatusCode};
-use http_body_util::Full;
-use hyper::{body::Bytes as HyperBytes, server::conn::http1, service::service_fn};
-use hyper_util::rt::TokioIo;
 use moka::future::Cache;
 use nanoid::nanoid;
 use op_alloy_network::Optimism;
@@ -44,13 +38,13 @@ use reth_optimism_node::{
     OpNode,
 };
 use reth_optimism_rpc::OpEthApiBuilder;
+use reth_optimism_txpool::OpPooledTransaction;
 use reth_transaction_pool::{AllTransactionsEvents, TransactionPool};
 use std::{
-    net::SocketAddr,
     sync::{Arc, LazyLock},
     time::Instant,
 };
-use tokio::{net::TcpListener, sync::oneshot, task::JoinHandle};
+use tokio::{sync::oneshot, task::JoinHandle};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tokio_util::sync::CancellationToken;
 
@@ -64,7 +58,6 @@ pub struct LocalInstance {
     exit_future: NodeExitFuture,
     _node_handle: Box<dyn Any + Send>,
     pool_observer: TransactionPoolObserver,
-    attestation_server: Option<AttestationServer>,
 }
 
 impl LocalInstance {
@@ -94,20 +87,11 @@ impl LocalInstance {
 
         let (rpc_ready_tx, rpc_ready_rx) = oneshot::channel::<()>();
         let (txpool_ready_tx, txpool_ready_rx) =
-            oneshot::channel::<AllTransactionsEvents<FBPooledTransaction>>();
+            oneshot::channel::<AllTransactionsEvents<OpPooledTransaction>>();
 
         let signer = args.builder_signer.unwrap_or(builder_signer());
         args.builder_signer = Some(signer);
         args.rollup_args.enable_tx_conditional = true;
-
-        let attestation_server = if args.flashtestations.flashtestations_enabled {
-            let server = spawn_attestation_provider().await?;
-            args.flashtestations.quote_provider = Some(server.url());
-            tracing::info!("Started attestation server at {}", server.url());
-            Some(server)
-        } else {
-            None
-        };
 
         let builder_config = BuilderConfig::<P::Config>::try_from(args.clone())
             .expect("Failed to convert rollup args to builder config");
@@ -137,24 +121,6 @@ impl LocalInstance {
                     .payload(P::new_service(builder_config)?),
             )
             .with_add_ons(addons)
-            .extend_rpc_modules(move |ctx| {
-                if args.enable_revert_protection {
-                    tracing::info!("Revert protection enabled");
-
-                    let pool = ctx.pool().clone();
-                    let provider = ctx.provider().clone();
-                    let revert_protection_ext = RevertProtectionExt::new(
-                        pool,
-                        provider,
-                        ctx.registry.eth_api().clone(),
-                        reverted_cache,
-                    );
-
-                    ctx.modules.add_or_replace_configured(revert_protection_ext.into_rpc())?;
-                }
-
-                Ok(())
-            })
             .on_rpc_started(move |_, _| {
                 let _ = rpc_ready_tx.send(());
                 Ok(())
@@ -184,16 +150,7 @@ impl LocalInstance {
             _node_handle: node_handle,
             task_manager: Some(task_manager),
             pool_observer: TransactionPoolObserver::new(pool_monitor, reverted_cache_clone),
-            attestation_server,
         })
-    }
-
-    /// Creates new local instance of the OP builder node with the standard builder configuration.
-    /// This method prefunds the default accounts with 1 ETH each.
-    pub async fn standard() -> eyre::Result<Self> {
-        let args = crate::args::Cli::parse_from(["dummy", "node"]);
-        let Commands::Node(ref node_command) = args.command else { unreachable!() };
-        Self::new::<StandardBuilder>(node_command.ext.clone()).await
     }
 
     /// Creates new local instance of the OP builder node with the flashblocks builder configuration.
@@ -251,10 +208,6 @@ impl LocalInstance {
 
     pub const fn pool(&self) -> &TransactionPoolObserver {
         &self.pool_observer
-    }
-
-    pub const fn attestation_server(&self) -> &Option<AttestationServer> {
-        &self.attestation_server
     }
 
     pub async fn driver(&self) -> eyre::Result<ChainDriver<Ipc>> {
@@ -338,22 +291,11 @@ fn task_manager() -> TaskManager {
     TaskManager::new(tokio::runtime::Handle::current())
 }
 
-fn pool_component(args: &OpRbuilderArgs) -> OpPoolBuilder<FBPooledTransaction> {
+fn pool_component(args: &OpRbuilderArgs) -> OpPoolBuilder {
     let rollup_args = &args.rollup_args;
-    OpPoolBuilder::<FBPooledTransaction>::default()
-        .with_enable_tx_conditional(
-            // Revert protection uses the same internal pool logic as conditional transactions
-            // to garbage collect transactions out of the bundle range.
-            rollup_args.enable_tx_conditional || args.enable_revert_protection,
-        )
+    OpPoolBuilder::default()
+        .with_enable_tx_conditional(rollup_args.enable_tx_conditional)
         .with_supervisor(rollup_args.supervisor_http.clone(), rollup_args.supervisor_safety_level)
-}
-
-async fn spawn_attestation_provider() -> eyre::Result<AttestationServer> {
-    let quote = include_bytes!("./artifacts/test-quote.bin");
-    let mut service = AttestationServer::new(TEE_DEBUG_ADDRESS, Bytes::new(), quote.into());
-    service.start().await?;
-    Ok(service)
 }
 
 /// A flashblock payload with its receive timestamp
@@ -454,121 +396,5 @@ impl FlashblocksListener {
     pub async fn stop(self) -> eyre::Result<()> {
         self.cancellation_token.cancel();
         self.handle.await?
-    }
-}
-
-/// A utility service to spawn a server that returns a mock quote for an attestation request
-pub struct AttestationServer {
-    tee_address: Address,
-    extra_registration_data: Bytes,
-    mock_attestation: Bytes,
-    server_handle: Option<JoinHandle<()>>,
-    shutdown_tx: Option<oneshot::Sender<()>>,
-    port: u16,
-    error_on_request: bool,
-}
-
-impl AttestationServer {
-    pub fn new(
-        tee_address: Address,
-        extra_registration_data: Bytes,
-        mock_attestation: Bytes,
-    ) -> Self {
-        AttestationServer {
-            tee_address,
-            extra_registration_data,
-            mock_attestation,
-            server_handle: None,
-            shutdown_tx: None,
-            port: 0,
-            error_on_request: false,
-        }
-    }
-
-    pub fn set_error(&mut self, error: bool) {
-        self.error_on_request = error;
-    }
-
-    pub async fn start(&mut self) -> eyre::Result<u16> {
-        self.port = get_available_port();
-        let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
-        let listener = TcpListener::bind(addr).await?;
-
-        let mock_attestation = self.mock_attestation.clone();
-        // Concatenate tee_address bytes and extra_registration_data bytes, then hex encode
-        let combined = [
-            self.tee_address.as_slice(), // 20 bytes address
-            keccak256(self.extra_registration_data.clone()).as_slice(), // 32 byte hash
-            &[0u8; 12],                  // padding to 64 bytes
-        ]
-        .concat();
-        let set_error = self.error_on_request;
-
-        let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
-        self.shutdown_tx = Some(shutdown_tx);
-
-        // Create the service
-        self.server_handle = Some(tokio::spawn(async move {
-            loop {
-                let mock_attestation = mock_attestation.clone();
-                let expected_path = format!("/{}", hex::encode(&combined));
-                tokio::select! {
-                    // Handle shutdown signal
-                    _ = &mut shutdown_rx => {
-                        break;
-                    }
-                    result = listener.accept() => {
-                        let (stream, _) = result.expect("failed to accept attestation request");
-
-                     tokio::task::spawn(async move {
-                        let service = service_fn(move |req: Request<hyper::body::Incoming>| {
-                            let response =
-                            if set_error {
-                                Response::builder()
-                                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                .body(Full::new(HyperBytes::new()))
-                                .unwrap()
-                            }
-                            else if req.uri().path() == expected_path {
-                                Response::builder()
-                                    .header("content-type", "application/octet-stream")
-                                    .body(Full::new(mock_attestation.clone().into()))
-                                    .unwrap()
-                            } else {
-                                    Response::builder()
-                                    .status(StatusCode::NOT_FOUND)
-                                    .body(Full::new(HyperBytes::new()))
-                                    .unwrap()
-                                };
-                            async { Ok::<_, hyper::Error>(response) }
-                        });
-
-                        let io = TokioIo::new(stream);
-                        if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
-                            tracing::error!(message = "Error serving attestations", error = %err);
-                        }
-                    });
-                }
-                }
-            }
-        }));
-
-        // Give the spawned task a chance to start
-        tokio::task::yield_now().await;
-
-        Ok(self.port)
-    }
-
-    pub fn url(&self) -> String {
-        format!("http://127.0.0.1:{}", self.port)
-    }
-}
-
-impl Drop for AttestationServer {
-    fn drop(&mut self) {
-        if let Some(tx) = self.shutdown_tx.take() {
-            let _ = tx.send(());
-        }
-        tracing::info!("AttestationServer dropped, terminating server");
     }
 }
